@@ -472,7 +472,7 @@ def main(
         _, table_name = utils.check_roi_dem_exist(engine, catchment_boundary)
         if table_name:
             logger.info(
-                f"The ROI already exist in database, please fetch DEM from database using utils/clip_dem function."
+                f"The DEM for this ROI already exists in database, so it can be fetched with utils.clip_dem function"
             )
             return
 

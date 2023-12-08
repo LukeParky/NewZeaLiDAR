@@ -802,7 +802,7 @@ def get_dem_by_geometry(
     if table_name == tables.USERDEM.__tablename__:
         user_dem = gdf
         if (gdf.area - geometry.area).iloc[0] > 10:
-            # Geometry is within exisitng DEM but is smaller so needs to be clipped
+            # Geometry is within existing DEM but is smaller so needs to be clipped
             user_dem = clip_dem(engine, gdf, geometry, index=index)
         raw_dem_path = user_dem["raw_dem_path"].values[0]
         hydro_dem_path = user_dem["hydro_dem_path"].values[0]
