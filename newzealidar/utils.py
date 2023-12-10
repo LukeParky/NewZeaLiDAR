@@ -747,8 +747,8 @@ def get_dem_by_id(engine: Engine, index: Union[int, str, list]) -> pd.DataFrame:
     query = f"SELECT * FROM hydro_dem WHERE catch_id IN {index} ;"
     df = pd.read_sql(query, engine)
     if df.empty:
-        logger.info(f"Unable to find DEM by catch_id {index} in the database.")
-        query = f"SELECT * FROM user_dem WHERE catch_id in {index}"
+        logger.info(f"Unable to find DEM by catch_id {index} in hydro_dem table. Trying user_dem table.")
+        query = f"SELECT * FROM user_dem WHERE catch_id IN {index}"
         df = pd.read_sql(query, engine)
     if not df.empty:
         hydro_dem_path = df["hydro_dem_path"].to_list()
@@ -802,7 +802,7 @@ def get_dem_by_geometry(
     if table_name == tables.USERDEM.__tablename__:
         user_dem = gdf
         if (gdf.area - geometry.area).iloc[0] > 10:
-            # Geometry is within existing DEM but is smaller so needs to be clipped
+            # Geometry is within exisitng DEM but is smaller so needs to be clipped
             user_dem = clip_dem(engine, gdf, geometry, index=index)
         raw_dem_path = user_dem["raw_dem_path"].values[0]
         hydro_dem_path = user_dem["hydro_dem_path"].values[0]
@@ -948,7 +948,7 @@ def clip_dem(
         / pathlib.Path(f"{index}")
     )
     clipped_dem_path.mkdir(parents=True, exist_ok=True)
-    catch_id = gdf["catch_id"].to_list()
+    catch_id = gdf["catch_id"][0]
     logger.info(f"Clipping catchment DEM {catch_id} to generate user DEM {index}.")
     df = get_dem_by_id(engine, catch_id)
     assert len(df) == len(

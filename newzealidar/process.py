@@ -469,11 +469,17 @@ def main(
 
     # check if catchment already exist in hydro_dem table, pass
     if check_dem_exist:
-        _, table_name = utils.check_roi_dem_exist(engine, catchment_boundary)
+        gdf, table_name = utils.check_roi_dem_exist(engine, catchment_boundary)
         if table_name:
             logger.info(
-                f"The DEM for this ROI already exists in database, so it can be fetched with utils.clip_dem function"
+                "The DEM for this ROI already is already covered by another DEM in the database, " \
+                f"DEM {gdf['catch_id'][0]}"
             )
+            # Extract shapely polygon, since we know there is only one polygon from check_roi_dem_exist we can simplify
+            catchment_polygon = catchment_boundary["geometry"][0]
+            if table_name == USERDEM.__tablename__ and (gdf.area - catchment_polygon.area).iloc[0] > 10:
+                # We can clip the DEM here so that it is processed and ready to be read
+                utils.clip_dem(engine, gdf, catchment_polygon, index=index)
             return
 
     lidar_extent_file = (
