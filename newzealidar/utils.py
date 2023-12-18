@@ -706,6 +706,10 @@ def check_roi_dem_exist(
         relation="ST_Contains",
         buffer=-0.1,
     )
+    # Set geometry to be the detailed internal geometry, not extents
+    gdf['geometry'] = gpd.GeoSeries.from_wkb(gdf['geometry'])
+    gdf = gdf.set_geometry("geometry")
+
     if not gdf.empty:
         gdf.sort_values("created_at", ascending=False, inplace=True)
         if isinstance(geometry, (gpd.GeoDataFrame, gpd.GeoSeries)):
@@ -802,7 +806,7 @@ def get_dem_by_geometry(
     if table_name == tables.USERDEM.__tablename__:
         user_dem = gdf
         if (gdf.area - geometry.area).iloc[0] > 10:
-            # Geometry is within exisitng DEM but is smaller so needs to be clipped
+            # Geometry is within existing DEM but is smaller so needs to be clipped
             user_dem = clip_dem(engine, gdf, geometry, index=index)
         raw_dem_path = user_dem["raw_dem_path"].values[0]
         hydro_dem_path = user_dem["hydro_dem_path"].values[0]
