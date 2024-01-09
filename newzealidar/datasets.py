@@ -337,7 +337,7 @@ def crawl_dataset() -> None:
             / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
         ),
     )
-    process.start()
+    process.start(install_signal_handlers=False)
     time.sleep(180)  # sleep 3 minutes for scrapy to finish downloading files.
     try:
         # use an exception to stop the process because process.stop() does not work in some cases.
