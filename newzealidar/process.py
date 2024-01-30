@@ -475,6 +475,8 @@ def main(
                 "The DEM for this ROI already is already covered by another DEM in the database, " \
                 f"DEM {gdf['catch_id'][0]}"
             )
+            # Select the newest row in the gdf
+            gdf = gdf.sort_values(by=["created_at"]).iloc[[0]]
             # Extract shapely polygon, since we know there is only one polygon from check_roi_dem_exist we can simplify
             catchment_polygon = catchment_boundary["geometry"][0]
             if table_name == USERDEM.__tablename__ and (gdf.area - catchment_polygon.area).iloc[0] > 10:
