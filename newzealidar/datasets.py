@@ -358,6 +358,7 @@ def rename_file():
     data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR")) / pathlib.Path(
         utils.get_env_variable("LIDAR_DIR")
     )
+    data_dir.mkdir(parents=True, exist_ok=True)
     list_file = utils.get_files([".kml", "xml"], data_dir)
     count = 0
     for file in list_file:
