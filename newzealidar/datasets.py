@@ -113,12 +113,12 @@ class ExtraFilesPipeline(FilesPipeline):
 
     def file_path(self, request, response=None, info=None, *, item=None):
         """Rename downloaded files."""
-        end_str = request.url.split("=")[-1]
+        end_str = request.url[-3:]
         if end_str == "xml":
             directory = pathlib.Path(item["meta_path"]).parent
             name = "tmp_datasets__" + str(pathlib.Path(item["meta_path"]).name)
             file_path = str(pathlib.PurePosixPath(directory / pathlib.Path(name)))
-        elif end_str == "true":  # kml url is ended with "download=true"
+        elif end_str == "son":
             directory = pathlib.Path(item["extent_path"]).parent
             name = "tmp_datasets__" + str(pathlib.Path(item["extent_path"]).name)
             file_path = str(pathlib.PurePosixPath(directory / pathlib.Path(name)))
@@ -214,7 +214,7 @@ class DatasetSpider(CrawlSpider):
     def __init__(self, data_dir, *a, **kw):
         super(DatasetSpider, self).__init__(*a, **kw)
         self.data_dir = data_dir
-        self.start_urls = ("https://portal.opentopography.org/",)
+        self.start_urls = ("https://portal.opentopography.org/", "https://raw.githubusercontent.com/")
 
     def start_requests(self):
         urls = [
@@ -296,9 +296,13 @@ class DatasetSpider(CrawlSpider):
         )
         item["datum"] = search_string(r"Vertical: (\w+\s*\d+)", datum)
         item["dataset_url"] = response.url
-        file_urls = response.xpath(
-            '//a[text()="ISO 19115 (Data)" or starts-with(@href, "/getKml")]/@href'
-        ).extract()
+        if item["name"]:
+            file_urls = response.xpath(
+                f"""//a[text()="ISO 19115 (Data)" or text()="{item['name']}.geojson"]/@href"""
+            ).extract()
+            file_urls = file_urls[:2]
+        else:
+            file_urls = []
         file_urls = [response.urljoin(u) for u in file_urls]
         item["file_urls"] = file_urls
         data_path = pathlib.Path(self.data_dir) / pathlib.Path(item["name"])
@@ -307,7 +311,7 @@ class DatasetSpider(CrawlSpider):
         )
         item["extent_path"] = str(
             pathlib.PurePosixPath(data_path)
-            / pathlib.Path(item["name"] + "_Extent.kml")
+            / pathlib.Path(item["name"] + ".geojson")
         )
         item["tile_path"] = str(
             pathlib.PurePosixPath(data_path)
@@ -369,7 +373,7 @@ def rename_file():
         utils.get_env_variable("LIDAR_DIR")
     )
     data_dir.mkdir(parents=True, exist_ok=True)
-    list_file = utils.get_files([".kml", "xml"], data_dir)
+    list_file = utils.get_files(["geojson", "xml"], data_dir)
     count = 0
     for file in list_file:
         file = pathlib.Path(file)
@@ -379,7 +383,7 @@ def rename_file():
                 new_file.unlink()
             file.rename(new_file)
             count += 1
-    logger.debug(f"Finish renaming {count} .xml and .kml file.")
+    logger.debug(f"Finish renaming {count} .xml and .geojson file.")
 
 
 def run():
