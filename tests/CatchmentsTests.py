@@ -4,6 +4,8 @@ import unittest
 from unittest import mock, TestCase
 
 from src import catchments, utils
+
+from newzealidar import env_var
 from . import Base
 
 
@@ -14,7 +16,7 @@ class CatchmentsTests(Base, TestCase):
         """override the parameters in base class if needed."""
 
     @mock.patch.dict(os.environ, {'DATA_DIR': r'tests/data',
-                                  'POSTGRES_PORT': utils.get_env_variable('POSTGRES_PORT_TEST')})
+                                  'POSTGRES_PORT': env_var.get_env_variable('POSTGRES_PORT_TEST')})
     def test_catchments_with_json(self):
         """
         basic test of catchments module.

@@ -4,6 +4,8 @@ import unittest
 from unittest import mock, TestCase
 
 from src import lidar_waikato, utils
+
+from newzealidar import env_var
 from . import Base
 
 
@@ -59,7 +61,7 @@ class LidarWaikatoTests(Base, TestCase):
         }
 
     @mock.patch.dict(os.environ, {'DATA_DIR': r'tests/data',
-                                  'POSTGRES_PORT': utils.get_env_variable('POSTGRES_PORT_TEST')})
+                                  'POSTGRES_PORT': env_var.get_env_variable('POSTGRES_PORT_TEST')})
     def test_lidar_with_dataset_info(self):
         """
         basic test of lidar_waikato module.
@@ -68,7 +70,7 @@ class LidarWaikatoTests(Base, TestCase):
         lidar_waikato.run(self.dataset_info)
 
     @mock.patch.dict(os.environ, {'DATA_DIR': r'tests/data',
-                                  'POSTGRES_PORT': utils.get_env_variable('POSTGRES_PORT_TEST')})
+                                  'POSTGRES_PORT': env_var.get_env_variable('POSTGRES_PORT_TEST')})
     def test_lidar_without_dataset_info(self):
         """
         basic test of lidar_waikato module.

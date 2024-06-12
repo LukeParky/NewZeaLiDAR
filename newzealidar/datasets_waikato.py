@@ -14,7 +14,7 @@ import pandas as pd
 from fiona.drvsupport import supported_drivers
 from sqlalchemy.engine import Engine
 
-from newzealidar import utils
+from newzealidar import env_var, utils
 from newzealidar.tables import (
     DATASET,
     create_table,
@@ -188,8 +188,8 @@ def run(dataset_info: dict = None) -> None:
             ],
         }
     engine = utils.get_database()
-    data_path = pathlib.Path(utils.get_env_variable("DATA_DIR")) / pathlib.Path(
-        utils.get_env_variable("WAIKATO_DIR")
+    data_path = pathlib.Path(env_var.get_env_variable("DATA_DIR")) / pathlib.Path(
+        env_var.get_env_variable("WAIKATO_DIR")
     )
     kml_path = data_path / pathlib.Path("LiDAR_Regional_Extent.kml")
     gdf = get_extent_info(kml_path)
