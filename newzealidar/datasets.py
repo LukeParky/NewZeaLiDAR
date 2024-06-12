@@ -22,6 +22,7 @@ from scrapy.pipelines.files import FilesPipeline
 from scrapy.spiders import CrawlSpider
 from shapely.geometry import Polygon
 
+from newzealidar.s3_connection import S3Manager
 from newzealidar import utils
 from newzealidar.tables import DATASET, create_table, delete_table, get_max_value
 
@@ -384,6 +385,27 @@ def rename_file():
     logger.debug(f"Finish renaming {count} .xml and .geojson file.")
 
 
+def store_file_to_s3(execution_time):
+    """
+    Store files in an AWS S3 bucket if their last modified timestamp is newer than the module's execution time.
+    """
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = utils.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    if use_aws_s3_bucket:
+        # Get the directory containing the files to upload
+        data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR")) / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+        # Get a list of files in the directory with specified extensions (geojson and xml)
+        list_file = utils.get_files(["geojson", "xml"], data_dir)
+        # Iterate through each file in the list
+        for file in list_file:
+            # Get the last modified timestamp of the file
+            file_timestamp = datetime.fromtimestamp(pathlib.Path(file).stat().st_mtime)
+            # If the file's last modified timestamp is newer than the execution time, store it in the S3 bucket
+            if file_timestamp > execution_time:
+                s3_manager = S3Manager()
+                s3_manager.store_file(s3_object_key=file, file_path=file)
+
+
 def run():
     """Run the module."""
     crawl_dataset()
@@ -406,9 +428,12 @@ def run():
 # for Digital-Twins
 def main(gdf=None, log_level="INFO"):
     """Run the module."""
+    # Capture the time when this module is being executed
+    execution_time = datetime.now()
     logger.setLevel(log_level)
     crawl_dataset()
     rename_file()
+    store_file_to_s3(execution_time)
     instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
     # generate dataset mapping info
     engine = utils.get_database()
