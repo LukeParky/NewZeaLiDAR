@@ -4,12 +4,12 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python
+  - python==3.11
   - pip
   - python-dotenv
   - pytest
   - lxml
-  - pandas
+  - pandas<2.2
   - geopandas
   - rasterio
   - geojson
@@ -21,13 +21,13 @@ dependencies:
   - psycopg2
   - sqlalchemy<2.0  # v2.0 does not supported by some packages yet.
   - geoalchemy2
-  - scrapy
+  - scrapy==2.11.1
   - dask
   - bokeh!=3.0.*,>=2.4.2  # for Dask dashboard
   - laspy
   - pip:
     - laszip  # for vertical datum transference
-    - geofabrics
+    - geofabrics<=0.10.23
     - geovoronoi
     - geoapis
 prefix:
