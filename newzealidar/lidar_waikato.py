@@ -12,7 +12,7 @@ import geopandas as gpd
 import pandas as pd
 from sqlalchemy.engine import Engine
 
-from newzealidar import utils
+from newzealidar import env_var, utils
 from newzealidar.lidar import store_lidar_to_db, check_file_number
 from newzealidar.tables import TILE, DATASET, create_table, deduplicate_table
 
@@ -155,7 +155,7 @@ def run(dataset_info: dict = None) -> None:
     Run the process store Waikato LiDAR datasets to database.
     :param dataset_info: dictionary of dataset information
     """
-    data_dir = utils.get_env_variable("DATA_DIR")
+    data_dir = env_var.get_env_variable("DATA_DIR")
     # dataset_info = {'name': [...], 'dataset_dir': [...]}
     # manually create a dictionary to store dataset information,
     # zip_dir is the directory where the tile index zip file is stored.
@@ -205,7 +205,7 @@ def run(dataset_info: dict = None) -> None:
             ],
         }
     data_path = pathlib.Path(data_dir) / pathlib.Path(
-        utils.get_env_variable("WAIKATO_DIR")
+        env_var.get_env_variable("WAIKATO_DIR")
     )
     engine = utils.get_database()
     check_file_identity(dataset_info, ".laz")
