@@ -28,6 +28,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool
 
 from newzealidar import tables, env_var
+from newzealidar.s3_connection import S3Manager
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +235,11 @@ def gen_boundary_file(
     with open(file_path, "w") as f:
         geojson.dump(feature_collection, f, indent=2)
     logging.info(f"Generate region of interest geojson file at {file_path}.")
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        s3_manager.store_file(s3_object_key=file_path, file_path=file_path)
 
 
 def map_dataset_name(
@@ -815,8 +821,16 @@ def clip_netcdf(
     """ "
     Clip netcdf file by geometry
     """
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    s3_manager = S3Manager()
+
     list_dem = []
     for file in file_list:
+        if use_aws_s3_bucket is True:
+            s3_objects = s3_manager.list_objects()
+            if file in s3_objects:
+                s3_manager.retrieve_file(file, file)
         if pathlib.Path(file).exists():
             # ValueError: Resulting object does not have monotonic global indexes along dimension y
             # list_xds.append(xr.open_dataset(file))
@@ -832,6 +846,8 @@ def clip_netcdf(
     save_file.unlink() if save_file.exists() else None
     xds_clipped.to_netcdf(save_file, mode="w")
     logger.debug(f"Save clipped NetCDF to {save_file}.")
+    if use_aws_s3_bucket is True:
+        s3_manager.store_file(s3_object_key=save_file, file_path=save_file)
 
 
 def gen_clipped_data(
@@ -854,8 +870,8 @@ def gen_clipped_data(
     hydro_dem_file_list = df["hydro_dem_path"].tolist()
     raw_dem_file_list = df["raw_dem_path"].tolist()
     hydro_save_path = save_dir / pathlib.Path(f"{index}.nc")
-    raw_save_path = save_dir / pathlib.Path(f"{index}_raw.nc")
-    extent_save_path = save_dir / pathlib.Path(f"{index}_raw_extent.geojson")
+    raw_save_path = save_dir / pathlib.Path(f"{index}_raw_dem.nc")
+    extent_save_path = save_dir / pathlib.Path(f"{index}_raw_extents.geojson")
     raw_extent_save_path = save_dir / pathlib.Path(f"{index}.geojson")
 
     # clip and save
@@ -914,7 +930,7 @@ def clip_dem(
             "raw_dem_path": str(clipped_dem_path / pathlib.Path(f"{index}_raw_dem.nc")),
             "hydro_dem_path": str(clipped_dem_path / pathlib.Path(f"{index}.nc")),
             "extent_path": str(
-                clipped_dem_path / pathlib.Path(f"{index}_extent.geojson")
+                clipped_dem_path / pathlib.Path(f"{index}_raw_extents.geojson")
             ),
             "raw_geometry": geometry,
             "geometry": clipped_dem_geometry,
@@ -935,14 +951,20 @@ def save_gpkg(gdf: gpd.GeoDataFrame, file: Union[Type[Ttable], str]):
     Save source catchments to GPKG
     """
     gpkg_path = pathlib.Path(env_var.get_env_variable("DATA_DIR")) / pathlib.Path("gpkg")
+    pathlib.Path(gpkg_path).mkdir(parents=True, exist_ok=True)
     if isinstance(file, str):
         file_name = f"{file}.gpkg"
     else:
         file_name = f"{file.__tablename__}.gpkg"
-    pathlib.Path(gpkg_path).mkdir(parents=True, exist_ok=True)
+    file_path = gpkg_path / pathlib.Path(file_name)
     gdf.set_crs(epsg=2193, inplace=True)
-    gdf.to_file(str(gpkg_path / pathlib.Path(file_name)), driver="GPKG")
-    logging.info(f"Save source catchments to {gpkg_path / pathlib.Path(file_name)}.")
+    gdf.to_file(str(file_path), driver="GPKG")
+    logging.info(f"Save source catchments to {file_path}.")
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        s3_manager.store_file(s3_object_key=file_path, file_path=file_path)
 
 
 def make_valid(geometry: shapely.geometry) -> shapely.geometry:
