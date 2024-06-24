@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest import mock, TestCase
 
-from src import datasets, utils
+from newzealidar import env_var, datasets
 from . import Base
 
 
@@ -11,7 +11,7 @@ class DatasetsTests(Base, TestCase):
     """Tests the datasets module."""
 
     @mock.patch.dict(os.environ, {'DATA_DIR': r'tests/data',
-                                  'POSTGRES_PORT': utils.get_env_variable('POSTGRES_PORT_TEST')})
+                                  'POSTGRES_PORT': env_var.get_env_variable('POSTGRES_PORT_TEST')})
     def test_datasets(self):
         """
         basic test of datasets module.

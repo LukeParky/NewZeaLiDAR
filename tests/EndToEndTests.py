@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest import mock, TestCase
 
-from src import catchments, datasets, datasets_waikato, lidar, lidar_waikato, process, utils, tables
+from newzealidar import env_var, catchments, datasets, datasets_waikato, lidar, lidar_waikato, process, tables
 from . import Base
 
 
@@ -11,7 +11,7 @@ class EndToEndTests(Base, TestCase):
     """Tests all the module."""
 
     @mock.patch.dict(os.environ, {'DATA_DIR': r'tests/data',
-                                  'POSTGRES_PORT': utils.get_env_variable('POSTGRES_PORT_TEST')})
+                                  'POSTGRES_PORT': env_var.get_env_variable('POSTGRES_PORT_TEST')})
     def test_end_to_end_api(self):
         """
         basic test of the pipeline which check (and download) all the data by api from OpenTopography.
@@ -25,7 +25,7 @@ class EndToEndTests(Base, TestCase):
         tables.check_all_table_duplicate()
 
     @mock.patch.dict(os.environ, {'DATA_DIR': r'tests/data',
-                                  'POSTGRES_PORT': utils.get_env_variable('POSTGRES_PORT_TEST')})
+                                  'POSTGRES_PORT': env_var.get_env_variable('POSTGRES_PORT_TEST')})
     def test_end_to_end_local(self):
         """
         basic test of the pipeline which use the data from local storage and database.
