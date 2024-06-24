@@ -3,9 +3,7 @@ import os
 import unittest
 from unittest import mock, TestCase
 
-from src import catchments, datasets, datasets_waikato, lidar, lidar_waikato, process, utils, tables
-
-from newzealidar import env_var
+from newzealidar import env_var, catchments, datasets, datasets_waikato, lidar, lidar_waikato, process, tables
 from . import Base
 
 

@@ -3,9 +3,7 @@ import os
 import unittest
 from unittest import mock, TestCase
 
-from src import process, utils
-
-from newzealidar import env_var
+from newzealidar import env_var, process
 from . import Base
 
 

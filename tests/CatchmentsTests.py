@@ -3,9 +3,7 @@ import os
 import unittest
 from unittest import mock, TestCase
 
-from src import catchments, utils
-
-from newzealidar import env_var
+from newzealidar import env_var, catchments
 from . import Base
 
 
