@@ -11,7 +11,7 @@ import time
 import warnings
 from typing import Union
 
-from newzealidar import utils
+from newzealidar import env_var
 
 
 class FilterRecords(logging.Filter):
@@ -54,7 +54,7 @@ def setup_logging(
         for name in logging.Logger.manager.loggerDict.keys():
             logging.getLogger(name).setLevel(logging.ERROR)
 
-    value = utils.get_env_variable(env_key)
+    value = env_var.get_env_variable(env_key)
     path = default_path
     if value:
         path = value

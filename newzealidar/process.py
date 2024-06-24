@@ -21,7 +21,7 @@ import pandas as pd
 from geofabrics import processor
 from sqlalchemy.engine import Engine
 
-from newzealidar import utils
+from newzealidar import env_var, utils
 from newzealidar.tables import (
     SDC,
     CATCHMENT,
@@ -72,11 +72,11 @@ def gen_instructions(
     """Read basic instruction file and adds keys and uses geojson as catchment_boundary"""
     if instructions["instructions"]["processing"].get("number_of_cores") is None:
         instructions["instructions"]["processing"]["number_of_cores"] = os.cpu_count()
-    data_dir = pathlib.PurePosixPath(utils.get_env_variable("DATA_DIR"))
+    data_dir = pathlib.PurePosixPath(env_var.get_env_variable("DATA_DIR"))
     if grid:
-        dem_dir = pathlib.PurePosixPath(utils.get_env_variable("GRID_DIR"))
+        dem_dir = pathlib.PurePosixPath(env_var.get_env_variable("GRID_DIR"))
     else:
-        dem_dir = pathlib.PurePosixPath(utils.get_env_variable("DEM_DIR"))
+        dem_dir = pathlib.PurePosixPath(env_var.get_env_variable("DEM_DIR"))
     index_dir = pathlib.PurePosixPath(str(index))
     subfolder = pathlib.PurePosixPath(dem_dir / index_dir)
     if instructions["instructions"].get("data_paths") is None:
@@ -92,10 +92,10 @@ def gen_instructions(
     instructions["instructions"]["data_paths"][
         "catchment_boundary"
     ] = f"{index}.geojson"
-    if utils.get_env_variable("LAND_FILE", allow_empty=True) != "":
+    if env_var.get_env_variable("LAND_FILE", allow_empty=True) != "":
         # cwd is in dem_dir: datastorage/hydro_dem/index
         instructions["instructions"]["data_paths"]["land"] = str(
-            f"../../{str(pathlib.PurePosixPath(utils.get_env_variable('LAND_FILE')))}"
+            f"../../{str(pathlib.PurePosixPath(env_var.get_env_variable('LAND_FILE')))}"
         )
     catchment_boundary_file = str(
         pathlib.PurePosixPath(data_dir / subfolder / pathlib.Path(f"{index}.geojson"))
@@ -109,7 +109,7 @@ def gen_instructions(
                 instructions["instructions"]["datasets"]["vector"] = {"linz": {}}
             instructions["instructions"]["datasets"]["vector"]["linz"][
                 "key"
-            ] = utils.get_env_variable("LINZ_API_KEY")
+            ] = env_var.get_env_variable("LINZ_API_KEY")
             instructions["instructions"]["datasets"]["vector"]["linz"]["land"] = {
                 "layers": [51153]
             }
@@ -458,8 +458,8 @@ def main(
         assert index.isdigit(), f"User define catchment index {index} is not digit."
     logger.info(f"Start Catchment {index} processing...")
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+    dem_dir = pathlib.Path(env_var.get_env_variable("DEM_DIR"))
     result_dir = data_dir / dem_dir
     if isinstance(catchment_boundary, str):
         # read geojson string, not a file
@@ -485,7 +485,7 @@ def main(
             return
 
     lidar_extent_file = (
-        pathlib.Path(utils.get_env_variable("DATA_DIR"))
+        pathlib.Path(env_var.get_env_variable("DATA_DIR"))
         / pathlib.Path("gpkg")
         / pathlib.Path("lidar_extent.gpkg")
     )
@@ -505,7 +505,7 @@ def main(
         geojson_file.parent.mkdir(parents=True, exist_ok=True)
         if not pathlib.Path(geojson_file).exists():
             utils.gen_boundary_file(result_dir, catchment_boundary, index)
-        instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+        instructions_file = pathlib.Path(env_var.get_env_variable("INSTRUCTIONS_FILE"))
         with open(instructions_file, "r") as f:
             instructions = json.loads(f.read())
         try:
@@ -557,10 +557,10 @@ def run(
     :param gpkg: if True, save the hydrological conditioned dem as geopackage.
     """
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+    dem_dir = pathlib.Path(env_var.get_env_variable("DEM_DIR"))
     catch_path = data_dir / dem_dir
-    instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+    instructions_file = pathlib.Path(env_var.get_env_variable("INSTRUCTIONS_FILE"))
     with open(instructions_file, "r") as f:
         instructions = json.loads(f.read())
 
@@ -668,7 +668,7 @@ def run(
             # save lidar extent to check on QGIS
             if gpkg:
                 gpkg_file = (
-                    pathlib.Path(utils.get_env_variable("DATA_DIR"))
+                    pathlib.Path(env_var.get_env_variable("DATA_DIR"))
                     / pathlib.Path("gpkg")
                     / pathlib.Path("dem_extent.gpkg")
                 )
@@ -745,10 +745,10 @@ def run_grid(
     :param gpkg: if True, save the raw dem extent as geopackage.
     """
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    dem_dir = pathlib.Path(utils.get_env_variable("GRID_DIR"))
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+    dem_dir = pathlib.Path(env_var.get_env_variable("GRID_DIR"))
     grid_path = data_dir / dem_dir
-    instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+    instructions_file = pathlib.Path(env_var.get_env_variable("INSTRUCTIONS_FILE"))
     with open(instructions_file, "r") as f:
         instructions = json.loads(f.read())
 
@@ -834,7 +834,7 @@ def run_grid(
             # save lidar extent to check on QGIS
             if gpkg:
                 gpkg_file = (
-                    pathlib.Path(utils.get_env_variable("DATA_DIR"))
+                    pathlib.Path(env_var.get_env_variable("DATA_DIR"))
                     / pathlib.Path("gpkg")
                     / pathlib.Path("grid_extent.gpkg")
                 )
