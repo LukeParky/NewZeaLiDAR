@@ -17,8 +17,7 @@ import shapely
 from geoapis.vector import WfsQueryBase
 from sqlalchemy.engine import Engine
 
-from newzealidar import tables
-from newzealidar import utils
+from newzealidar import env_var, tables, utils
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +95,7 @@ def fetch_data_from_mfe(
     :param verbose: print log or not, default is True
     :return: fetched data
     """
-    key = utils.get_env_variable("MFE_API_KEY")
+    key = env_var.get_env_variable("MFE_API_KEY")
     vector_fetcher = MFE(
         key=key, crs=crs, bounding_polygon=bounding_polygon, verbose=verbose
     )
@@ -884,8 +883,8 @@ def gen_coast_catchments(
         resolution=CATCHMENT_RESOLUTION,
         polygon_threshold=lower_area,
     )
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    land_path = pathlib.Path(utils.get_env_variable("LAND_FILE"))
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+    land_path = pathlib.Path(env_var.get_env_variable("LAND_FILE"))
     gdf_land = gpd.read_file(data_dir / land_path)
     gdf_land = gdf_land.to_crs(epsg=2193)
     geom_land_ex = gdf_land["geometry"].buffer(coast_distance).unary_union
@@ -1187,8 +1186,8 @@ def gen_grid_table(
     logger.info("Generating grid table content...")
     engine = utils.get_database()
 
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    land_path = pathlib.Path(utils.get_env_variable("LAND_FILE"))
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+    land_path = pathlib.Path(env_var.get_env_variable("LAND_FILE"))
     gdf_land = gpd.read_file(data_dir / land_path)
     gdf_land = gdf_land.to_crs(epsg=2193)
     geom_land_ex = gdf_land["geometry"].buffer(coast_distance).unary_union

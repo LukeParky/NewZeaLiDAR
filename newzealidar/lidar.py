@@ -16,7 +16,7 @@ import geopandas as gpd
 import pandas as pd
 from sqlalchemy.engine import Engine
 
-from newzealidar import utils
+from newzealidar import env_var, utils
 from newzealidar.tables import (
     TILE,
     LIDAR,
@@ -389,13 +389,13 @@ def run(
     :param buffer: buffer distance for roi_gdf.
     """
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    lidar_dir = pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+    lidar_dir = pathlib.Path(env_var.get_env_variable("LIDAR_DIR"))
     data_path = data_dir / lidar_dir
     if isinstance(
         roi_id, (int, str, list)
     ):  # catch_id get higher priority then roi_gdf and roi_file
-        dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
+        dem_dir = pathlib.Path(env_var.get_env_variable("DEM_DIR"))
         catch_path = data_dir / dem_dir
         roi_gdf = get_roi_from_id(roi_id, catch_path)
     if name_base:

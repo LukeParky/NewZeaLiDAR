@@ -22,7 +22,7 @@ from scrapy.pipelines.files import FilesPipeline
 from scrapy.spiders import CrawlSpider
 from shapely.geometry import Polygon
 
-from newzealidar import utils
+from newzealidar import env_var, utils
 from newzealidar.tables import DATASET, create_table, delete_table, get_max_value
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ supported_drivers["LIBKML"] = "rw"
 def get_extent_geometry(item: scrapy.Item) -> gpd.GeoSeries.geometry:
     """Get extent geometry from kml file."""
     file = (
-        pathlib.Path(utils.get_env_variable("DATA_DIR"))
-        / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+        pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+        / pathlib.Path(env_var.get_env_variable("LIDAR_DIR"))
         / pathlib.Path(item["extent_path"])
     )
     file = file.parent / pathlib.Path("tmp_datasets__" + str(file.name))
@@ -53,8 +53,8 @@ def get_extent_geometry(item: scrapy.Item) -> gpd.GeoSeries.geometry:
             # do not suggest to use this method, because read and transform tile index file to geometry is slow.
             # the tile index file will not exist if lidar.py does not download the tile index file.
             file1 = (
-                    pathlib.Path(utils.get_env_variable("DATA_DIR"))
-                    / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+                    pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+                    / pathlib.Path(env_var.get_env_variable("LIDAR_DIR"))
                     / pathlib.Path(item["tile_path"])
             )
             if os.path.exists(file1):
@@ -348,7 +348,7 @@ def crawl_dataset() -> None:
             "Chrome/34.0.1847.131 Safari/537.36",
             "DOWNLOAD_DELAY": 1.5,  # to avoid request too frequently and get incomplete response.
             "ITEM_PIPELINES": {"newzealidar.datasets.ExtraFilesPipeline": 1},
-            "FILES_STORE": f"{pathlib.Path(utils.get_env_variable('DATA_DIR')) / pathlib.Path(utils.get_env_variable('LIDAR_DIR'))}",
+            "FILES_STORE": f"{pathlib.Path(env_var.get_env_variable('DATA_DIR')) / pathlib.Path(env_var.get_env_variable('LIDAR_DIR'))}",
             "LOG_LEVEL": "INFO",
         }
     )
@@ -356,8 +356,8 @@ def crawl_dataset() -> None:
         DatasetSpider,
         # data_dir for DatasetSpider init
         str(
-            pathlib.Path(utils.get_env_variable("DATA_DIR"))
-            / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+            pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+            / pathlib.Path(env_var.get_env_variable("LIDAR_DIR"))
         ),
     )
     process.start(install_signal_handlers=False)
@@ -378,8 +378,8 @@ def rename_file():
     Scrapy does not overwrite the existing files, so the downloaded files
     will be named to make sure download files are latest for each crawling.
     """
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR")) / pathlib.Path(
-        utils.get_env_variable("LIDAR_DIR")
+    data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR")) / pathlib.Path(
+        env_var.get_env_variable("LIDAR_DIR")
     )
     data_dir.mkdir(parents=True, exist_ok=True)
     list_file = utils.get_files(["geojson", "xml"], data_dir)
@@ -399,7 +399,7 @@ def run():
     """Run the module."""
     crawl_dataset()
     rename_file()
-    instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+    instructions_file = pathlib.Path(env_var.get_env_variable("INSTRUCTIONS_FILE"))
     # generate dataset mapping info
     engine = utils.get_database()
     utils.map_dataset_name(engine, instructions_file)
@@ -414,7 +414,7 @@ def main(gdf=None, log_level="INFO"):
     logger.setLevel(log_level)
     crawl_dataset()
     rename_file()
-    instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+    instructions_file = pathlib.Path(env_var.get_env_variable("INSTRUCTIONS_FILE"))
     # generate dataset mapping info
     engine = utils.get_database()
     utils.map_dataset_name(engine, instructions_file)
