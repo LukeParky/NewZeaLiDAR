@@ -22,6 +22,7 @@ from geofabrics import processor
 from sqlalchemy.engine import Engine
 
 from newzealidar import env_var, utils
+from newzealidar.s3_connection import S3Manager
 from newzealidar.tables import (
     SDC,
     CATCHMENT,
@@ -59,6 +60,11 @@ def save_instructions(instructions: dict, instructions_path: str) -> None:
     pathlib.Path(instructions_path).parent.mkdir(parents=True, exist_ok=True)
     with open(instructions_path, "w") as f:
         json.dump(instructions, f, default=_recursive_str, indent=2)
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        s3_manager.store_file(s3_object_key=instructions_path, file_path=instructions_path)
 
 
 def gen_instructions(
@@ -136,6 +142,59 @@ def gen_instructions(
     return instructions
 
 
+def store_vector_files_to_s3(s3_manager, s3_objects, instructions: dict):
+    data_paths = instructions["instructions"]["data_paths"]
+    vector_dir = pathlib.Path(data_paths["local_cache"]) / "vector" / data_paths["subfolder"]
+    vector_files = utils.get_files([""], vector_dir)
+    for file in vector_files:
+        if file not in s3_objects:
+            s3_manager.store_file(s3_object_key=file, file_path=file)
+
+
+def store_lidar_files_to_s3(s3_manager, s3_objects, instructions: dict):
+    data_paths = instructions["instructions"]["data_paths"]
+    lidar_names = instructions["instructions"]["datasets"]["lidar"]["open_topography"].keys()
+    for name in lidar_names:
+        lidar_dir = pathlib.Path(data_paths["local_cache"]) / "lidar" / name
+        lidar_files = utils.get_files([".zip", ".laz"], lidar_dir)
+        for file in lidar_files:
+            if file not in s3_objects:
+                s3_manager.store_file(s3_object_key=file, file_path=file)
+
+
+def store_raw_files_to_s3(s3_manager, s3_objects, instructions: dict):
+    data_paths = instructions["instructions"]["data_paths"]
+    raw_dem_path = pathlib.Path(data_paths["local_cache"]) / data_paths["subfolder"] / data_paths["raw_dem"]
+    if raw_dem_path.as_posix() not in s3_objects:
+        s3_manager.store_file(s3_object_key=raw_dem_path, file_path=raw_dem_path)
+    raw_extents_path = pathlib.Path(data_paths["local_cache"]) / data_paths["subfolder"] / data_paths["raw_dem_extents"]
+    if raw_extents_path.as_posix() not in s3_objects:
+        s3_manager.store_file(s3_object_key=raw_extents_path, file_path=raw_extents_path)
+
+
+def store_raw_dem_to_s3(instructions: dict) -> None:
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        s3_objects = s3_manager.list_objects()
+        store_vector_files_to_s3(s3_manager, s3_objects, instructions)
+        store_lidar_files_to_s3(s3_manager, s3_objects, instructions)
+        store_raw_files_to_s3(s3_manager, s3_objects, instructions)
+
+
+def store_hydro_dem_to_s3(instructions: dict) -> None:
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        s3_objects = s3_manager.list_objects()
+        data_paths = instructions["instructions"]["data_paths"]
+        result_dem_path = pathlib.Path(data_paths["local_cache"]) / data_paths["subfolder"] / data_paths["result_dem"]
+        if result_dem_path.as_posix() not in s3_objects:
+            s3_manager.store_file(s3_object_key=result_dem_path, file_path=result_dem_path)
+
+
 def gen_raw_dem(instructions: dict) -> None:
     """Use geofabrics to generate the hydrologically conditioned DEM."""
     runner = processor.RawLidarDemGenerator(instructions["instructions"], debug=False)
@@ -200,7 +259,9 @@ def single_process(
             / pathlib.Path(single_instructions["instructions"]["data_paths"]["raw_dem"])
         ).exists():
             gen_raw_dem(single_instructions)
+            store_raw_dem_to_s3(single_instructions)
         gen_hydro_dem(single_instructions)
+        store_hydro_dem_to_s3(single_instructions)
     gc.collect()
     return single_instructions
 
@@ -489,13 +550,20 @@ def main(
         / pathlib.Path("gpkg")
         / pathlib.Path("lidar_extent.gpkg")
     )
-    if lidar_extent_file.exists():
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    s3_manager = S3Manager()
+    s3_objects = s3_manager.list_objects()
+    if use_aws_s3_bucket is True and lidar_extent_file.as_posix() in s3_objects:
+        lidar_extent = s3_manager.retrieve_object(lidar_extent_file)
+    elif use_aws_s3_bucket is False and lidar_extent_file.exists():
         lidar_extent = gpd.read_file(lidar_extent_file, driver="GPKG")
     else:
         # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
         lidar_extent = utils.gen_table_extent(engine, DATASET)
         # save lidar extent to check on QGIS
         utils.save_gpkg(lidar_extent, "lidar_extent")
+
     if lidar_extent.buffer(buffer).intersects(catchment_boundary).any():
         geojson_file = (
             pathlib.Path(result_dir)
@@ -503,7 +571,7 @@ def main(
             / pathlib.Path(f"{index}.geojson")
         )
         geojson_file.parent.mkdir(parents=True, exist_ok=True)
-        if not pathlib.Path(geojson_file).exists():
+        if not pathlib.Path(geojson_file).exists() or geojson_file.as_posix() not in s3_objects:
             utils.gen_boundary_file(result_dir, catchment_boundary, index)
         instructions_file = pathlib.Path(env_var.get_env_variable("INSTRUCTIONS_FILE"))
         with open(instructions_file, "r") as f:
