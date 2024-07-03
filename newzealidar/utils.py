@@ -823,7 +823,7 @@ def clip_netcdf(
     Clip netcdf file by geometry
     """
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     s3_manager = S3Manager()
 
     list_dem = []
