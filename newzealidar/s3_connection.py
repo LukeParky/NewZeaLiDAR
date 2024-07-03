@@ -186,7 +186,7 @@ class S3Manager:
         # Log a message confirming successful storage in the S3 bucket
         log.info(f"Successfully stored `{s3_object_key}` in the S3 bucket.")
 
-    def retrieve_file(self, s3_object_key, file_path):
+    def retrieve_file(self, s3_object_key: Union[str, pathlib.Path], file_path: Union[str, pathlib.Path]) -> None:
         """
         Downloads a S3 object to a local file.
         ----------
