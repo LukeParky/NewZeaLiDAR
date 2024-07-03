@@ -145,6 +145,7 @@ def gen_instructions(
 def store_vector_files_to_s3(s3_manager, s3_objects, instructions: dict):
     data_paths = instructions["instructions"]["data_paths"]
     vector_dir = pathlib.Path(data_paths["local_cache"]) / "vector" / data_paths["subfolder"]
+    # Get the path of all the files regardless of their filetype extension in the vector_dir
     vector_files = utils.get_files([""], vector_dir)
     for file in vector_files:
         if file not in s3_objects:
