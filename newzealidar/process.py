@@ -175,7 +175,7 @@ def store_raw_files_to_s3(s3_manager, s3_objects, instructions: dict):
 
 def store_raw_dem_to_s3(instructions: dict) -> None:
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
         s3_objects = s3_manager.list_objects()
@@ -186,7 +186,7 @@ def store_raw_dem_to_s3(instructions: dict) -> None:
 
 def store_hydro_dem_to_s3(instructions: dict) -> None:
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
         s3_objects = s3_manager.list_objects()
