@@ -552,7 +552,7 @@ def main(
         / pathlib.Path("lidar_extent.gpkg")
     )
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     s3_manager = S3Manager()
     s3_objects = s3_manager.list_objects()
     if use_aws_s3_bucket is True and lidar_extent_file.as_posix() in s3_objects:
