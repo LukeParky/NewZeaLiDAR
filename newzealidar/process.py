@@ -61,7 +61,7 @@ def save_instructions(instructions: dict, instructions_path: str) -> None:
     with open(instructions_path, "w") as f:
         json.dump(instructions, f, default=_recursive_str, indent=2)
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
         s3_manager.store_file(s3_object_key=instructions_path, file_path=instructions_path)
