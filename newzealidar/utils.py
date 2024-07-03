@@ -239,6 +239,7 @@ def gen_boundary_file(
     use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
+        # Save the geojson FeatureCollection to S3 bucket cloud storage
         s3_manager.store_file(s3_object_key=file_path, file_path=file_path)
 
 
