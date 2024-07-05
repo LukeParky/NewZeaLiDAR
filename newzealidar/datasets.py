@@ -15,7 +15,6 @@ import geopandas as gpd
 import pandas as pd
 import scrapy
 import scrapy.item
-from fiona.drvsupport import supported_drivers
 from scrapy.crawler import CrawlerProcess
 from scrapy.exceptions import CloseSpider
 from scrapy.pipelines.files import FilesPipeline
@@ -26,8 +25,6 @@ from newzealidar import utils
 from newzealidar.tables import DATASET, create_table, delete_table, get_max_value
 
 logger = logging.getLogger(__name__)
-
-supported_drivers["LIBKML"] = "rw"
 
 
 def get_extent_geometry(item: scrapy.Item) -> gpd.GeoSeries.geometry:
@@ -226,7 +223,7 @@ class DatasetSpider(CrawlSpider):
 
     def parse_table(self, response):
         for url in response.xpath(
-            '//a[text()="Full Dataset Metadata"]/@href'
+                '//a[text()="Full Dataset Metadata"]/@href'
         ).extract():
             url = response.urljoin(url)
             yield scrapy.Request(url, callback=self.parse_metadata)
@@ -235,9 +232,9 @@ class DatasetSpider(CrawlSpider):
         item = DatasetItem()
         item["name"] = (
             response.xpath('//strong[text()="Short Name"]/following-sibling::text()[1]')
-            .extract()[0]
-            .split(":")[-1]
-            .strip()
+                .extract()[0]
+                .split(":")[-1]
+                .strip()
         )
         # item['ot_id'] = response.xpath(
         #     '//strong[text()="OT Collection ID"]/following-sibling::text()[1]'
@@ -246,14 +243,14 @@ class DatasetSpider(CrawlSpider):
             response.xpath(
                 '//strong[text()="OT Collection Name"]/following-sibling::text()[1]'
             )
-            .extract()[0]
-            .split(":")[-1]
-            .strip()
+                .extract()[0]
+                .split(":")[-1]
+                .strip()
         )
         survey_date = (
             response.xpath('//strong[text()="Survey Date"]/following-sibling::text()')
-            .extract()[0]
-            .strip()
+                .extract()[0]
+                .strip()
         )
         survey_date = survey_date.split("-")
         if len(survey_date) == 1:  # no start date
@@ -274,8 +271,8 @@ class DatasetSpider(CrawlSpider):
             response.xpath(
                 '//strong[text()="Publication Date"]/following-sibling::text()'
             )
-            .extract()[0]
-            .strip()
+                .extract()[0]
+                .strip()
         )
         date = search_string(r"(\d{2}/\d{2}/\d{4})", date)
         item["publication_date"] = datetime.strptime(date, "%m/%d/%Y").strftime(
@@ -288,9 +285,9 @@ class DatasetSpider(CrawlSpider):
             response.xpath(
                 '//strong[text()="Point Density"]/following-sibling::text()[1]'
             )
-            .extract()[0]
-            .split()[1]
-            .strip()
+                .extract()[0]
+                .split()[1]
+                .strip()
         )
         datum = (
             response.xpath('//text()[contains(., "Vertical:")]').extract()[0].strip()
@@ -334,8 +331,8 @@ def crawl_dataset() -> None:
     process = CrawlerProcess(
         {
             "USER_AGENT": "Mozilla/5.0 (Windows NT 6.1; WOW64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/34.0.1847.131 Safari/537.36",
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/34.0.1847.131 Safari/537.36",
             "DOWNLOAD_DELAY": 1.5,  # to avoid request too frequently and get incomplete response.
             "ITEM_PIPELINES": {"newzealidar.datasets.ExtraFilesPipeline": 1},
             "FILES_STORE": "./",
@@ -420,4 +417,3 @@ def main(gdf=None, log_level="INFO"):
 
 if __name__ == "__main__":
     run()
-
