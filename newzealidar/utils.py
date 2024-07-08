@@ -236,9 +236,10 @@ def gen_boundary_file(
         geojson.dump(feature_collection, f, indent=2)
     logging.info(f"Generate region of interest geojson file at {file_path}.")
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
+        # Save the geojson FeatureCollection to S3 bucket cloud storage
         s3_manager.store_file(s3_object_key=file_path, file_path=file_path)
 
 
@@ -822,7 +823,7 @@ def clip_netcdf(
     Clip netcdf file by geometry
     """
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     s3_manager = S3Manager()
 
     list_dem = []
@@ -830,7 +831,7 @@ def clip_netcdf(
         if use_aws_s3_bucket is True:
             s3_objects = s3_manager.list_objects()
             if file in s3_objects:
-                s3_manager.retrieve_file(file,file)
+                s3_manager.retrieve_file(file, file)
         if pathlib.Path(file).exists():
             # ValueError: Resulting object does not have monotonic global indexes along dimension y
             # list_xds.append(xr.open_dataset(file))
@@ -961,7 +962,7 @@ def save_gpkg(gdf: gpd.GeoDataFrame, file: Union[Type[Ttable], str]):
     gdf.to_file(str(file_path), driver="GPKG")
     logging.info(f"Save source catchments to {file_path}.")
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
         s3_manager.store_file(s3_object_key=file_path, file_path=file_path)

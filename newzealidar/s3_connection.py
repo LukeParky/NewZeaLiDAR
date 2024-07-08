@@ -223,4 +223,3 @@ class S3Manager:
             obj.delete()
         # Log a message confirming successful removal of all objects from the S3 bucket
         log.info("Successfully removed all objects from the S3 bucket.")
-

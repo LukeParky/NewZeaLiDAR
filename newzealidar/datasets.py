@@ -34,8 +34,8 @@ supported_drivers["LIBKML"] = "rw"
 def get_extent_geometry(item: scrapy.Item) -> gpd.GeoSeries.geometry:
     """Get extent geometry from kml file."""
     file = (
-        pathlib.Path(utils.get_env_variable("DATA_DIR"))
-        / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+        pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+        / pathlib.Path(env_var.get_env_variable("LIDAR_DIR"))
         / pathlib.Path(item["extent_path"])
     )
     file = file.parent / pathlib.Path("tmp_datasets__" + str(file.name))
@@ -54,8 +54,8 @@ def get_extent_geometry(item: scrapy.Item) -> gpd.GeoSeries.geometry:
             # do not suggest to use this method, because read and transform tile index file to geometry is slow.
             # the tile index file will not exist if lidar.py does not download the tile index file.
             file1 = (
-                    pathlib.Path(utils.get_env_variable("DATA_DIR"))
-                    / pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+                    pathlib.Path(env_var.get_env_variable("DATA_DIR"))
+                    / pathlib.Path(env_var.get_env_variable("LIDAR_DIR"))
                     / pathlib.Path(item["tile_path"])
             )
             if os.path.exists(file1):
@@ -349,7 +349,7 @@ def crawl_dataset() -> None:
             "Chrome/34.0.1847.131 Safari/537.36",
             "DOWNLOAD_DELAY": 1.5,  # to avoid request too frequently and get incomplete response.
             "ITEM_PIPELINES": {"newzealidar.datasets.ExtraFilesPipeline": 1},
-            "FILES_STORE": f"{pathlib.Path(utils.get_env_variable('DATA_DIR')) / pathlib.Path(utils.get_env_variable('LIDAR_DIR'))}",
+            "FILES_STORE": f"{pathlib.Path(env_var.get_env_variable('DATA_DIR')) / pathlib.Path(env_var.get_env_variable('LIDAR_DIR'))}",
             "LOG_LEVEL": "INFO",
         }
     )
@@ -401,7 +401,7 @@ def store_file_to_s3(execution_time):
     Store files in an AWS S3 bucket if their last modified timestamp is newer than the module's execution time.
     """
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool)
+    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
     if use_aws_s3_bucket:
         # Get the directory containing the files to upload
         data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR")) / pathlib.Path(
