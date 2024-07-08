@@ -124,11 +124,11 @@ class ExtraFilesPipeline(FilesPipeline):
         if end_str == "xml":
             directory = pathlib.Path(item["meta_path"]).parent
             name = "tmp_datasets__" + str(pathlib.Path(item["meta_path"]).name)
-            file_path = str(pathlib.PurePosixPath(directory / pathlib.Path(name)))
+            file_path = str(pathlib.PurePosixPath(directory.name / pathlib.Path(name)))
         elif end_str == "son":
             directory = pathlib.Path(item["extent_path"]).parent
             name = "tmp_datasets__" + str(pathlib.Path(item["extent_path"]).name)
-            file_path = str(pathlib.PurePosixPath(directory / pathlib.Path(name)))
+            file_path = str(pathlib.PurePosixPath(directory.name / pathlib.Path(name)))
         else:
             logger.warning(f"input url {request.url} is not correct.")
             file_path = None
