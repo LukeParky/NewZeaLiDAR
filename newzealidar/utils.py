@@ -236,7 +236,7 @@ def gen_boundary_file(
         geojson.dump(feature_collection, f, indent=2)
     logging.info(f"Generate region of interest geojson file at {file_path}.")
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
+    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
         # Save the geojson FeatureCollection to S3 bucket cloud storage
@@ -823,7 +823,7 @@ def clip_netcdf(
     Clip netcdf file by geometry
     """
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
+    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", allow_empty=True, default=False)
     s3_manager = S3Manager()
 
     list_dem = []
@@ -962,7 +962,7 @@ def save_gpkg(gdf: gpd.GeoDataFrame, file: Union[Type[Ttable], str]):
     gdf.to_file(str(file_path), driver="GPKG")
     logging.info(f"Save source catchments to {file_path}.")
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_env_variable("USE_AWS_S3_BUCKET", cast_to=bool, allow_empty=True, default=False)
+    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", allow_empty=True, default=False)
     if use_aws_s3_bucket:
         s3_manager = S3Manager()
         s3_manager.store_file(s3_object_key=file_path, file_path=file_path)
