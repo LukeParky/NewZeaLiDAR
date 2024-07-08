@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "newzealidar"
-version = "0.1"
+version = "0.3"
 description = "A package for creating high-resolution DEM derived from LiDAR datasets of New Zealand."
 readme = "README.md"
 authors = [{ name = "Xander Cai", email = "xandcai@gmail.com" }]
@@ -33,7 +33,7 @@ dependencies = [
     "rasterio",
     "rioxarray",
     "netcdf4",
-    "scrapy",
+    "scrapy==2.11.1",
     "twisted<23.0",
     "psycopg2",
     "sqlalchemy<2.0",

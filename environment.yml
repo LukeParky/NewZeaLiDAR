@@ -21,7 +21,7 @@ dependencies:
   - psycopg2
   - sqlalchemy<2.0  # v2.0 does not supported by some packages yet.
   - geoalchemy2
-  - scrapy
+  - scrapy==2.11.1 # Newer versions are causing bugs where data is not downloaded
   - dask
   - bokeh!=3.0.*,>=2.4.2  # for Dask dashboard
   - laspy
