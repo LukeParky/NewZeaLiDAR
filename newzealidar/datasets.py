@@ -330,7 +330,7 @@ def crawl_dataset() -> None:
     Crawl the data from the website, save in the database,
     and save the metadata and extent files in the local directory.
     """
-    logger.info("Start crawling datasets from OpenTopography.")
+    logger.info("Start crawling datasets from OpenTopography. Haha")
     process = CrawlerProcess(
         {
             "USER_AGENT": "Mozilla/5.0 (Windows NT 6.1; WOW64) "
