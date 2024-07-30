@@ -4,12 +4,12 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python
+  - python==3.11
   - pip
   - python-dotenv
   - pytest
   - lxml
-  - pandas
+  - pandas<2.2
   - geopandas
   - rasterio
   - geojson
@@ -27,7 +27,7 @@ dependencies:
   - laspy
   - pip:
     - laszip  # for vertical datum transference
-    - geofabrics
+    - geofabrics<=0.10.23
     - geovoronoi
     - geoapis
 prefix:
