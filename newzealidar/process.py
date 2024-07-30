@@ -553,17 +553,24 @@ def main(
     )
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
     use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", allow_empty=True, default=False)
-    s3_manager = S3Manager()
-    s3_objects = s3_manager.list_objects()
-    if use_aws_s3_bucket is True and lidar_extent_file.as_posix() in s3_objects:
-        lidar_extent = s3_manager.retrieve_object(lidar_extent_file)
-    elif use_aws_s3_bucket is False and lidar_extent_file.exists():
-        lidar_extent = gpd.read_file(lidar_extent_file, driver="GPKG")
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        s3_objects = s3_manager.list_objects()
+        if lidar_extent_file.as_posix() in s3_objects:
+            lidar_extent = s3_manager.retrieve_object(lidar_extent_file)
+        else:
+            # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
+            lidar_extent = utils.gen_table_extent(engine, DATASET)
+            # save lidar extent to check on QGIS
+            utils.save_gpkg(lidar_extent, "lidar_extent")
     else:
-        # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
-        lidar_extent = utils.gen_table_extent(engine, DATASET)
-        # save lidar extent to check on QGIS
-        utils.save_gpkg(lidar_extent, "lidar_extent")
+        if lidar_extent_file.exists():
+            lidar_extent = gpd.read_file(lidar_extent_file, driver="GPKG")
+        else:
+            # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
+            lidar_extent = utils.gen_table_extent(engine, DATASET)
+            # save lidar extent to check on QGIS
+            utils.save_gpkg(lidar_extent, "lidar_extent")
 
     if lidar_extent.buffer(buffer).intersects(catchment_boundary).any():
         geojson_file = (
