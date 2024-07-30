@@ -401,7 +401,7 @@ def store_file_to_s3(execution_time):
     Store files in an AWS S3 bucket if their last modified timestamp is newer than the module's execution time.
     """
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
-    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", allow_empty=True, default=False)
+    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
     if use_aws_s3_bucket:
         # Get the directory containing the files to upload
         data_dir = pathlib.Path(env_var.get_env_variable("DATA_DIR")) / pathlib.Path(
