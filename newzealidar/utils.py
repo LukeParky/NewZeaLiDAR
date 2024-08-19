@@ -824,11 +824,11 @@ def clip_netcdf(
     """
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
     use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
-    s3_manager = S3Manager()
 
     list_dem = []
     for file in file_list:
         if use_aws_s3_bucket:
+            s3_manager = S3Manager()
             s3_objects = s3_manager.list_objects()
             if file in s3_objects:
                 s3_manager.retrieve_file(file, file)
@@ -847,7 +847,8 @@ def clip_netcdf(
     save_file.unlink() if save_file.exists() else None
     xds_clipped.to_netcdf(save_file, mode="w")
     logger.debug(f"Save clipped NetCDF to {save_file}.")
-    if use_aws_s3_bucket is True:
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
         s3_manager.store_file(s3_object_key=save_file, file_path=save_file)
 
 
