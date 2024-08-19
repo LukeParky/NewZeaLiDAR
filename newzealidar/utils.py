@@ -828,7 +828,7 @@ def clip_netcdf(
 
     list_dem = []
     for file in file_list:
-        if use_aws_s3_bucket is True:
+        if use_aws_s3_bucket:
             s3_objects = s3_manager.list_objects()
             if file in s3_objects:
                 s3_manager.retrieve_file(file, file)
