@@ -23,7 +23,7 @@ from scrapy.spiders import CrawlSpider
 from shapely.geometry import Polygon
 
 from newzealidar import env_var, utils
-from newzealidar.s3_connection import S3Manager
+from newzealidar.s3_connection import S3Manager, validate_aws_env_vars
 from newzealidar.tables import DATASET, create_table, delete_table, get_max_value
 
 logger = logging.getLogger(__name__)
@@ -432,6 +432,8 @@ def run():
 # for Digital-Twins
 def main(gdf=None, log_level="INFO"):
     """Run the module."""
+    # Validate that necessary AWS environment variables are set when S3 usage is enabled
+    validate_aws_env_vars()
     # Capture the time when this module is being executed
     execution_time = datetime.now()
     logger.setLevel(log_level)
