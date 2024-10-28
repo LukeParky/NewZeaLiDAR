@@ -29,17 +29,16 @@ def validate_aws_env_vars() -> None:
     """
     # Check if S3 usage is enabled from the USE_AWS_S3_BUCKET environment variable
     use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET")
+
     # If S3 usage is enabled, check that required AWS variables are set
     if use_aws_s3_bucket:
-        # Raise an error if AWS_ACCESS_KEY_ID is not set
-        if not env_var.get_env_variable("AWS_ACCESS_KEY_ID"):
-            raise ValueError("Environment variable `AWS_ACCESS_KEY_ID` must be set when S3 usage is enabled.")
-        # Raise an error if AWS_SECRET_ACCESS_KEY is not set
-        if not env_var.get_env_variable("AWS_SECRET_ACCESS_KEY"):
-            raise ValueError("Environment variable `AWS_SECRET_ACCESS_KEY` must be set when S3 usage is enabled.")
-        # Raise an error if AWS_BUCKET_NAME is not set
-        if not env_var.get_env_variable("AWS_BUCKET_NAME"):
-            raise ValueError("Environment variable `AWS_BUCKET_NAME` must be set when S3 usage is enabled.")
+        # List of required environment variables needed for S3 access
+        required_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BUCKET_NAME"]
+        # Loop through each required environment variable
+        for var in required_vars:
+            # Raise an error if the required environment variable is not set
+            if not env_var.get_env_variable(var, allow_empty=True):
+                raise ValueError(f"Environment variable `{var}` must be set when AWS S3 usage is enabled.")
 
 
 class S3Manager:
