@@ -143,6 +143,7 @@ def gen_instructions(
 
 
 def store_vector_files_to_s3(s3_manager, s3_objects, instructions: dict):
+    """Store vector files to AWS s3 bucket."""
     data_paths = instructions["instructions"]["data_paths"]
     vector_dir = pathlib.Path(data_paths["local_cache"]) / "vector" / data_paths["subfolder"]
     # Get the path of all the files regardless of their filetype extension in the vector_dir
@@ -153,6 +154,7 @@ def store_vector_files_to_s3(s3_manager, s3_objects, instructions: dict):
 
 
 def store_lidar_files_to_s3(s3_manager, s3_objects, instructions: dict):
+    """Store lidar files to AWS s3 bucket."""
     data_paths = instructions["instructions"]["data_paths"]
     lidar_names = instructions["instructions"]["datasets"]["lidar"]["open_topography"].keys()
     for name in lidar_names:
@@ -164,6 +166,7 @@ def store_lidar_files_to_s3(s3_manager, s3_objects, instructions: dict):
 
 
 def store_raw_files_to_s3(s3_manager, s3_objects, instructions: dict):
+    """Store raw files to AWS s3 bucket."""
     data_paths = instructions["instructions"]["data_paths"]
     raw_dem_path = pathlib.Path(data_paths["local_cache"]) / data_paths["subfolder"] / data_paths["raw_dem"]
     if raw_dem_path.as_posix() not in s3_objects:
@@ -174,6 +177,7 @@ def store_raw_files_to_s3(s3_manager, s3_objects, instructions: dict):
 
 
 def store_raw_dem_to_s3(instructions: dict) -> None:
+    """Store raw DEM files to AWS s3 bucket."""
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
     use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
     if use_aws_s3_bucket:
@@ -185,6 +189,7 @@ def store_raw_dem_to_s3(instructions: dict) -> None:
 
 
 def store_hydro_dem_to_s3(instructions: dict) -> None:
+    """Store hydro DEM files to AWS s3 bucket."""
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
     use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
     if use_aws_s3_bucket:
