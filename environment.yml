@@ -29,5 +29,5 @@ dependencies:
     - laszip  # for vertical datum transference
     - geofabrics<=0.10.23
     - geovoronoi
-    - geoapis
+    - geoapis==0.3.2
 prefix:
