@@ -797,23 +797,32 @@ def get_dem_band_and_resolution_by_geometry(
     """
     dem_path, _, _, _ = get_dem_by_geometry(engine, geometry)
 
-    # Open the Hydro DEM using rioxarray
-    with rxr.open_rasterio(pathlib.Path(dem_path)) as f:
-        # Select the first band of the Hydro DEM
-        hydro_dem = f.sel(band=band)
-        # Get the unique resolution from the Hydro DEM
-        unique_resolution = list(set(abs(res) for res in hydro_dem.rio.resolution()))
-        # Check if there is only one unique resolution
-        res_no = unique_resolution[0] if len(unique_resolution) == 1 else None
-        # Get the resolution from the Hydro DEM description
-        res_description = int(hydro_dem.description.split()[-1])
-        # Check if the resolution from the metadata matches the actual resolution
-        if res_no != res_description:
-            raise ValueError(
-                "Inconsistent resolution between metadata and actual resolution of the Hydro DEM."
-            )
-        else:
-            return hydro_dem, res_no
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
+
+    if use_aws_s3_bucket:
+        s3_manager = S3Manager()
+        hydro_dem = s3_manager.retrieve_object(dem_path)
+    else:
+        # Open the Hydro DEM using rioxarray
+        with rxr.open_rasterio(pathlib.Path(dem_path)) as f:
+            # Select the first band of the Hydro DEM
+            hydro_dem = f.sel(band=band)
+            hydro_dem = hydro_dem.reset_coords("band", drop=True)
+    # Get the unique resolution from the Hydro DEM
+    unique_resolution = list(set(abs(res) for res in hydro_dem.rio.resolution()))
+    # Check if there is only one unique resolution
+    res_no = unique_resolution[0] if len(unique_resolution) == 1 else None
+    # Get the resolution from the Hydro DEM description
+    res_description = int(hydro_dem.description.split()[-1])
+
+    # Check if the resolution from the metadata matches the actual resolution
+    if res_no != res_description:
+        raise ValueError(
+            "Inconsistent resolution between metadata and actual resolution of the Hydro DEM."
+        )
+    else:
+        return hydro_dem, res_no
 
 
 def clip_netcdf(
