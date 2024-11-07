@@ -9,7 +9,7 @@ import shutil
 from collections import OrderedDict
 from datetime import datetime
 from fnmatch import fnmatch
-from typing import Type, TypeVar, Union
+from typing import Type, TypeVar, Union, Tuple
 
 import geojson
 import geopandas as gpd
@@ -695,6 +695,35 @@ def check_roi_dem_exist(
     return gpd.GeoDataFrame(), None
 
 
+def check_file_existence(user_dem_paths: Tuple[str, str, str]) -> None:
+    """
+    Check if DEM files exist in the S3 bucket or local file system, and log warnings if any are missing.
+    """
+    hydro_dem_path, raw_dem_path, extent_path = user_dem_paths
+
+    # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
+    use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
+
+    if use_aws_s3_bucket:
+        # If S3 is being used, check the existence of files in S3
+        s3_manager = S3Manager()
+        s3_objects = s3_manager.list_objects()
+        if hydro_dem_path not in s3_objects:
+            logging.warning(f"Expected Hydro DEM file '{hydro_dem_path}' does not exist in the S3 bucket.")
+        if raw_dem_path not in s3_objects:
+            logging.warning(f"Expected Raw DEM file '{raw_dem_path}' does not exist in the S3 bucket.")
+        if extent_path not in s3_objects:
+            logging.warning(f"Expected Extent file '{extent_path}' does not exist in the S3 bucket.")
+    else:
+        # If S3 is not being used, check for local file existence
+        if not pathlib.Path(hydro_dem_path).exists():
+            logging.warning(f"Expected Hydro DEM file '{hydro_dem_path}' does not exist in the local file system.")
+        if not pathlib.Path(raw_dem_path).exists():
+            logging.warning(f"Expected Raw DEM file '{raw_dem_path}' does not exist in the local file system.")
+        if not pathlib.Path(extent_path).exists():
+            logging.warning(f"Expected Extent file '{extent_path}' does not exist in the local file system.")
+
+
 def get_dem_by_id(engine: Engine, index: Union[int, str, list]) -> pd.DataFrame:
     """
     get DEM file path by catch_id
@@ -710,22 +739,10 @@ def get_dem_by_id(engine: Engine, index: Union[int, str, list]) -> pd.DataFrame:
         query = f"SELECT * FROM user_dem WHERE catch_id IN {index}"
         df = pd.read_sql(query, engine)
     if not df.empty:
-        hydro_dem_path = df["hydro_dem_path"].to_list()
-        raw_dem_path = df["raw_dem_path"].to_list()
-        extent_path = df["extent_path"].to_list()
-        for _hydro_dem_path, _raw_dem_path, _extent_path in zip(
-            hydro_dem_path, raw_dem_path, extent_path
-        ):
-            if not pathlib.Path(_hydro_dem_path).exists():
-                logging.warning(
-                    f"Expected Hydro DEM File {_hydro_dem_path} does not exist."
-                )
-            if not pathlib.Path(_raw_dem_path).exists():
-                logging.warning(
-                    f"Expected Raw DEM File {_raw_dem_path} does not exist."
-                )
-            if not pathlib.Path(_extent_path).exists():
-                logging.warning(f"Expected Extent File {_extent_path} does not exist.")
+        dem_paths = list(zip(df["hydro_dem_path"], df["raw_dem_path"], df["extent_path"]))
+        for paths in dem_paths:
+            # Check if the DEM files exist either locally or in S3, log warnings if any are missing
+            check_file_existence(paths)
     return df
 
 
