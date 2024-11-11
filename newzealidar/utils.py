@@ -812,7 +812,8 @@ def get_dem_band_and_resolution_by_geometry(
     geometry: ROI geometry (polygon of selected region of interest)
     band: dataset band index, default is 1
     """
-    dem_path, _, _, _ = get_dem_by_geometry(engine, geometry)
+    dem_path_str, _, _, _ = get_dem_by_geometry(engine, geometry)
+    dem_path = pathlib.Path(dem_path_str)
 
     # Retrieve the value of the environment variable "USE_AWS_S3_BUCKET"
     use_aws_s3_bucket = env_var.get_bool_env_variable("USE_AWS_S3_BUCKET", default=False)
@@ -822,7 +823,7 @@ def get_dem_band_and_resolution_by_geometry(
         hydro_dem = s3_manager.retrieve_object(dem_path)
     else:
         # Open the Hydro DEM using rioxarray
-        with rxr.open_rasterio(pathlib.Path(dem_path)) as f:
+        with rxr.open_rasterio(dem_path) as f:
             # Select the first band of the Hydro DEM
             hydro_dem = f.sel(band=band)
             hydro_dem = hydro_dem.reset_coords("band", drop=True)
