@@ -24,7 +24,7 @@ import shapely
 from shapely import unary_union, to_geojson
 from shapely.geometry import MultiPolygon, Polygon, GeometryCollection, box
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool
 
@@ -154,7 +154,7 @@ def get_engine(
     pool_pre_ping: bool = False,
 ) -> Type[create_engine]:
     """
-    Get SQLalchemy engine using credentials.
+    Get SQLalchemy conn using credentials.
     Add connect_args to keep connection alive incase of long running process.
 
     :param db: database name
@@ -164,7 +164,7 @@ def get_engine(
     :param password: Password for the database
     :param null_pool: If True, use NullPool to avoid connection pool limitation in multiprocessing. Default is False.
     :param pool_pre_ping: If True, enable pool_pre_ping to check database connection before using. Default is False.
-    :return: SQLalchemy engine
+    :return: SQLalchemy conn
     """
     url = f"postgresql://{user}:{password}@{host}:{port}/{db}"
     poolclass = NullPool if null_pool else None
@@ -178,8 +178,10 @@ def get_engine(
             "keepalives_interval": 10,
             "keepalives_count": 5,
         },
+        isolation_level="AUTOCOMMIT"
     )
-    Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        Base.metadata.create_all(conn)
     return engine
 
 
@@ -289,14 +291,14 @@ def gen_boundary_file(
 
 
 def map_dataset_name(
-    engine: Engine, instructions_file: Union[str, pathlib.Path]
+    conn: Connection, instructions_file: Union[str, pathlib.Path]
 ) -> None:
     """Mapping dataset name with its ordered id by publication date (and so on), and save in a json file."""
     logger.info(
         "Mapping dataset name with its ordered id by publication date (and so on)."
     )
     query = f"SELECT name, survey_end_date, publication_date FROM dataset ;"
-    df = pd.read_sql(query, engine)
+    df = pd.read_sql(query, conn)
     # latest dataset first, if same then by name
     df = df.sort_values(
         by=["publication_date", "survey_end_date", "name"], ascending=False
@@ -331,7 +333,7 @@ def get_geometry_from_file(
 
 
 def get_geometry_from_db(
-    engine: Engine,
+    conn: Connection,
     table: Union[str, Type[Ttable]],
     column: Union[str, int],
     value: Union[str, int],
@@ -343,7 +345,7 @@ def get_geometry_from_db(
     if not isinstance(table, str):
         table = table.__tablename__
     query = f"SELECT {column}, geometry FROM {table} WHERE {column} = '{value}';"
-    gdf = gpd.read_postgis(query, engine, crs="epsg:2193", geom_col="geometry")
+    gdf = gpd.read_postgis(query, conn, crs="epsg:2193", geom_col="geometry")
     if gdf.empty:
         logger.error(f"Cannot find {column} = {value} in {table}.")
         return Polygon()
@@ -352,7 +354,7 @@ def get_geometry_from_db(
 
 
 def retrieve_dataset(
-    engine: Engine,
+    conn: Connection,
     boundary_file: Union[str, pathlib.Path] = None,
     sort_by: str = "survey_end_date",
     buffer: Union[int, float] = 0,
@@ -364,7 +366,7 @@ def retrieve_dataset(
     Sort the dataset name by 'sort_by', and return a dictionary of dataset name and crs.
     To safeguard the data/tile integrity, the geometry is buffered by 'buffer' distance, no buffer by default.
 
-    :param engine: sqlalchemy engine
+    :param conn: sqlalchemy conn
     :param boundary_df: boundary geodataframe, higher priority than boundary_file.
     :param boundary_file: boundary file path, geojson format. see demo examples in 'configs' directory.
     :param sort_by: sort dataset name by this column, default is 'survey_end_date'.
@@ -382,7 +384,7 @@ def retrieve_dataset(
         raise ValueError("Either boundary_df or boundary_file must be provided.")
     query = f"""SELECT name, {sort_by}, tile_path, geometry FROM dataset
                 WHERE ST_Intersects(geometry, ST_SetSRID('{geometry}'::geometry, 2193)) ;"""
-    gdf = gpd.read_postgis(query, engine, geom_col="geometry")
+    gdf = gpd.read_postgis(query, conn, geom_col="geometry")
     gdf = gdf.sort_values(sort_by, ascending=False)  # latest/largest first
     dataset_name_list = gdf["name"].to_list()
     tile_path_list = gdf["tile_path"].to_list()
@@ -393,7 +395,7 @@ def retrieve_dataset(
 
 
 def retrieve_lidar(
-    engine: Engine,
+    conn: Connection,
     boundary_file: Union[str, pathlib.Path],
     sort_by: str = "survey_end_date",
     buffer: Union[int, float] = 0,
@@ -406,14 +408,14 @@ def retrieve_lidar(
     in the end return a dictionary of dataset name, crs, .laz file path and tile index file.
     """
     datasets_dict, geometry, tile_path_list, _ = retrieve_dataset(
-        engine, boundary_file, sort_by, buffer=buffer
+        conn, boundary_file, sort_by, buffer=buffer
     )
     list_pop_dataset = []
     for dataset_name in datasets_dict.keys():
         query = f"""SELECT uuid, geometry FROM tile
                     WHERE ST_Intersects(geometry, ST_SetSRID('{geometry}'::geometry, 2193))
                     AND dataset = '{dataset_name}' ;"""
-        gdf = gpd.read_postgis(query, engine, geom_col="geometry")
+        gdf = gpd.read_postgis(query, conn, geom_col="geometry")
         if gdf.empty:
             logger.warning(
                 f"{dataset_name} does not have any tile in the ROI geometry, will pop the dataset. "
@@ -428,7 +430,7 @@ def retrieve_lidar(
             else str(f"""('{gdf["uuid"].values[0]}')""")
         )
         query = f"SELECT file_path FROM lidar WHERE uuid IN {uuid} ;"
-        df = pd.read_sql(query, engine)
+        df = pd.read_sql(query, conn)
         if df.empty:
             logger.warning(
                 f"{dataset_name} does not have any .laz file in the ROI geometry, will pop the dataset. "
@@ -460,7 +462,7 @@ def retrieve_lidar(
 
 
 def retrieve_catchment(
-    engine: Engine,
+    conn: Connection,
     boundary_file: Union[str, pathlib.Path],
     buffer: Union[int, float] = 0,
 ) -> list:
@@ -469,14 +471,14 @@ def retrieve_catchment(
     query dataset to get catch_id which covers the geometry based on the boundary geometry,
     to safeguard the data/tile integrity, the geometry is buffered by resolution * buffer_factor, no buffer by default.
 
-    :param engine: sqlalchemy engine
+    :param conn: sqlalchemy conn
     :param boundary_file: boundary file path, geojson format. see demo example in 'configs' directory.
     :param buffer: buffer factor for the boundary geometry, default is 0.
     """
     geometry = get_geometry_from_file(boundary_file, buffer=buffer)
     query = f"""SELECT catch_id, geometry FROM catchment
                 WHERE ST_Intersects(geometry, ST_SetSRID('{geometry}'::geometry, 2193)) ;"""
-    gdf = gpd.read_postgis(query, engine, geom_col="geometry")
+    gdf = gpd.read_postgis(query, conn, geom_col="geometry")
     catch_list = sorted(gdf["catch_id"].to_list())
     logger.info(
         f"Retrieved {len(catch_list)} catchments from catchment table:\n{catch_list}"
@@ -485,7 +487,7 @@ def retrieve_catchment(
 
 
 def retrieve_dem(
-    engine: Engine,
+    conn: Connection,
     boundary_file: Union[str, pathlib.Path],
     buffer: Union[int, float] = 0,
 ) -> pd.DataFrame:
@@ -494,12 +496,12 @@ def retrieve_dem(
     Query dataset to get file path which covers the geometry based on the boundary geometry,
     To safeguard the data/tile integrity, geometry is buffered by 'buffer' distance, no buffer by default.
 
-    :param engine: sqlalchemy engine
+    :param conn: sqlalchemy conn
     :param boundary_file: boundary file path, geojson format. see demo example in 'configs' directory.
     :param buffer: buffer factor for the boundary geometry, default is 0.
     """
-    catch_list = retrieve_catchment(engine, boundary_file, buffer)
-    df = tables.get_data_by_id(engine, tables.DEM, catch_list, geom_col="")
+    catch_list = retrieve_catchment(conn, boundary_file, buffer)
+    df = tables.get_data_by_id(conn, tables.DEM, catch_list, geom_col="")
     return df
 
 
@@ -661,7 +663,7 @@ def katana(
 
 
 def gen_table_extent(
-    engine: Engine, table: Union[str, Type[Ttable]], filter_it: bool = True
+    conn: Connection, table: Union[str, Type[Ttable]], filter_it: bool = True
 ) -> gpd.GeoDataFrame:
     """
     Generate catchment extent from catchment table or DEM table.
@@ -669,7 +671,7 @@ def gen_table_extent(
     if not isinstance(table, str):
         table = table.__tablename__
     if table == "hydro_dem" or table == "grid_dem":
-        df = pd.read_sql(f"SELECT * FROM {table} ;", engine)
+        df = pd.read_sql(f"SELECT * FROM {table} ;", conn)
         df["geometry"] = df["extent_path"].apply(lambda x: gpd.read_file(x).geometry[0])
         if table == "grid_dem":
             gdf = gpd.GeoDataFrame(
@@ -681,7 +683,7 @@ def gen_table_extent(
             )
     else:
         gdf = gpd.read_postgis(
-            f"SELECT * FROM {table}", engine, crs=2193, geom_col="geometry"
+            f"SELECT * FROM {table}", conn, crs=2193, geom_col="geometry"
         )
     if filter_it:
         geom = filter_geometry(gdf["geometry"])
@@ -690,16 +692,16 @@ def gen_table_extent(
 
 
 def check_roi_dem_exist(
-    engine: Engine, geometry: Union[gpd.GeoDataFrame, shapely.geometry]
+    conn: Connection, geometry: Union[gpd.GeoDataFrame, shapely.geometry]
 ) -> tuple:
     """
     check if the ROI DEM is in the database.
     """
     # ensure USERDEM table exists
-    tables.create_table(engine, tables.USERDEM)
+    tables.create_table(conn, tables.USERDEM)
     # check user defined DEM table first
     gdf = tables.get_catchment_by_geometry(
-        engine,
+        conn,
         tables.USERDEM,
         geometry,
         geom_col="raw_geometry",
@@ -720,10 +722,10 @@ def check_roi_dem_exist(
         return gdf, tables.USERDEM.__tablename__
 
     # ensure DEMATTR table exists
-    tables.create_table(engine, tables.DEMATTR)
+    tables.create_table(conn, tables.DEMATTR)
     # check pre-defined catchment DEM table then
     gdf = tables.get_catchment_by_geometry(
-        engine,
+        conn,
         tables.DEMATTR,
         geometry,
         geom_col="raw_geometry",
@@ -740,20 +742,20 @@ def check_roi_dem_exist(
     return gpd.GeoDataFrame(), None
 
 
-def get_dem_by_id(engine: Engine, index: Union[int, str, list]) -> pd.DataFrame:
+def get_dem_by_id(conn: Connection, index: Union[int, str, list]) -> pd.DataFrame:
     """
     get DEM file path by catch_id
     """
     if not isinstance(index, list):
         index = [index]
     index = tuple(index) if len(index) > 1 else str(f"({index[0]})")
-    tables.create_table(engine, tables.DEM)
+    tables.create_table(conn, tables.DEM)
     query = f"SELECT * FROM hydro_dem WHERE catch_id IN {index} ;"
-    df = pd.read_sql(query, engine)
+    df = pd.read_sql(query, conn)
     if df.empty:
         logger.info(f"Unable to find DEM by catch_id {index} in hydro_dem table. Trying user_dem table.")
         query = f"SELECT * FROM user_dem WHERE catch_id IN {index}"
-        df = pd.read_sql(query, engine)
+        df = pd.read_sql(query, conn)
     if not df.empty:
         hydro_dem_path = df["hydro_dem_path"].to_list()
         raw_dem_path = df["raw_dem_path"].to_list()
@@ -775,7 +777,7 @@ def get_dem_by_id(engine: Engine, index: Union[int, str, list]) -> pd.DataFrame:
 
 
 def get_dem_by_geometry(
-    engine: Engine,
+    conn: Connection,
     geometry: Union[shapely.Geometry, gpd.GeoDataFrame, gpd.GeoSeries, pd.Series],
     index: Union[int, str] = None,
 ) -> tuple:
@@ -784,7 +786,7 @@ def get_dem_by_geometry(
 
     parameters
     ----------
-    engine: sqlalchemy engine
+    conn: sqlalchemy conn
     geometry: ROI geometry (polygon of selected region of interest)
     index: ROI id, default is None
     """
@@ -800,21 +802,21 @@ def get_dem_by_geometry(
             len(geometry) == 1
         ), f"Only one geometry is allowed, {geometry.to_string()}."
         geometry = geometry["geometry"].values[0]
-    gdf, table_name = check_roi_dem_exist(engine, geometry)
+    gdf, table_name = check_roi_dem_exist(conn, geometry)
 
     # exact match in USERDEM table
     if table_name == tables.USERDEM.__tablename__:
         user_dem = gdf
         if (gdf.area - geometry.area).iloc[0] > 10:
             # Geometry is within existing DEM but is smaller so needs to be clipped
-            user_dem = clip_dem(engine, gdf, geometry, index=index)
+            user_dem = clip_dem(conn, gdf, geometry, index=index)
         raw_dem_path = user_dem["raw_dem_path"].values[0]
         hydro_dem_path = user_dem["hydro_dem_path"].values[0]
         extent_path = user_dem["extent_path"].values[0]
         resolution = user_dem["resolution"].values[0]
     # contains by catchment DEMs, need clip
     elif table_name == tables.DEMATTR.__tablename__:
-        clipped_gdf = clip_dem(engine, gdf, geometry, index=index)
+        clipped_gdf = clip_dem(conn, gdf, geometry, index=index)
         raw_dem_path = clipped_gdf["raw_dem_path"].values[0]
         hydro_dem_path = clipped_gdf["hydro_dem_path"].values[0]
         extent_path = clipped_gdf["extent_path"].values[0]
@@ -827,7 +829,7 @@ def get_dem_by_geometry(
 
 
 def get_dem_band_and_resolution_by_geometry(
-    engine: Engine,
+    conn: Connection,
     geometry: Union[shapely.Geometry, gpd.GeoDataFrame, gpd.GeoSeries],
     band: int = 1,
 ) -> tuple:
@@ -836,11 +838,11 @@ def get_dem_band_and_resolution_by_geometry(
 
     parameters
     ----------
-    engine: sqlalchemy engine
+    conn: sqlalchemy conn
     geometry: ROI geometry (polygon of selected region of interest)
     band: dataset band index, default is 1
     """
-    dem_path, _, _, _ = get_dem_by_geometry(engine, geometry)
+    dem_path, _, _, _ = get_dem_by_geometry(conn, geometry)
 
     # Open the Hydro DEM using rioxarray
     with rxr.open_rasterio(pathlib.Path(dem_path)) as f:
@@ -930,7 +932,7 @@ def gen_clipped_data(
 
 
 def clip_dem(
-    engine: Engine,
+    conn: Connection,
     gdf: gpd.GeoDataFrame,
     geometry: shapely.geometry,
     index: Union[int, str] = None,
@@ -954,7 +956,7 @@ def clip_dem(
     clipped_dem_path.mkdir(parents=True, exist_ok=True)
     catch_id = gdf["catch_id"][0]
     logger.info(f"Clipping catchment DEM {catch_id} to generate user DEM {index}.")
-    df = get_dem_by_id(engine, catch_id)
+    df = get_dem_by_id(conn, catch_id)
     assert len(df) == len(
         gdf
     ), f"Retrieve {len(df)} in DEM table, while retrieve {len(gdf)} in DEMATTR table."
@@ -975,9 +977,9 @@ def clip_dem(
         index=[0],
         crs="epsg:2193",
     )
-    tables.create_table(engine, tables.USERDEM)
+    tables.create_table(conn, tables.USERDEM)
     gdf_to_db.to_postgis(
-        tables.USERDEM.__tablename__, engine, if_exists="append", index=False
+        tables.USERDEM.__tablename__, conn, if_exists="append", index=False
     )
     return gdf_to_db
 

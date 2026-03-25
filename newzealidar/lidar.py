@@ -14,7 +14,7 @@ from typing import Union
 import geoapis.lidar
 import geopandas as gpd
 import pandas as pd
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection
 
 from newzealidar import utils
 from newzealidar.tables import (
@@ -98,22 +98,23 @@ def get_roi_from_id(
     index = [index] if not isinstance(index, list) else index
     gdf_read = gpd.GeoDataFrame(geometry=gpd.GeoSeries())
     engine = utils.get_database()
-    for i in index:
-        file = str(
-            pathlib.Path(file_path)
-            / pathlib.Path(f"{i}")
-            / pathlib.Path(f"{i}.geojson")
-        )
-        if not os.path.exists(file):
-            catchment_boundary = get_data_by_id(engine, CATCHMENT, i)
-            if catchment_boundary.empty:
-                catchment_boundary = get_data_by_id(engine, SDC, i)
+    with engine.connect() as conn:
+        for i in index:
+            file = str(
+                pathlib.Path(file_path)
+                / pathlib.Path(f"{i}")
+                / pathlib.Path(f"{i}.geojson")
+            )
+            if not os.path.exists(file):
+                catchment_boundary = get_data_by_id(conn, CATCHMENT, i)
                 if catchment_boundary.empty:
-                    logger.warning(f"Catchment {i} is not in database, ignore it.")
-                    continue
-            utils.gen_boundary_file(file_path, catchment_boundary, i)
-        gdf = get_roi_from_file(file, crs=crs)
-        gdf_read = pd.concat([gdf_read, gdf], ignore_index=True)
+                    catchment_boundary = get_data_by_id(conn, SDC, i)
+                    if catchment_boundary.empty:
+                        logger.warning(f"Catchment {i} is not in database, ignore it.")
+                        continue
+                utils.gen_boundary_file(file_path, catchment_boundary, i)
+            gdf = get_roi_from_file(file, crs=crs)
+            gdf_read = pd.concat([gdf_read, gdf], ignore_index=True)
     engine.dispose()
     # union all the polygons to one "region of interest"
     union_poly = gdf_read.geometry.unary_union
@@ -279,7 +280,7 @@ def gen_lidar_data(
     return df
 
 
-def store_tile_to_db(engine: Engine, file_path: str) -> gpd.GeoDataFrame:
+def store_tile_to_db(conn: Connection, file_path: str) -> gpd.GeoDataFrame:
     """
     Store tile information to tile table.
     Load the zip file where tile info are stored as shape file,
@@ -298,16 +299,16 @@ def store_tile_to_db(engine: Engine, file_path: str) -> gpd.GeoDataFrame:
     gdf_to_db = gdf_to_db[
         ["uuid", "dataset", "file_name", "source", "geometry", "created_at"]
     ]
-    create_table(engine, TILE)
+    create_table(conn, TILE)
     gdf_to_db.to_postgis(
-        "tile", engine, index=False, index_label="uuid", if_exists="append"
+        "tile", conn, index=False, index_label="uuid", if_exists="append"
     )
-    deduplicate_table(engine, TILE, "source")
+    deduplicate_table(conn, TILE, "source")
     return gdf_to_db
 
 
 def store_lidar_to_db(
-    engine: Engine,
+    conn: Connection,
     file_path: str,
     gdf_tile: gpd.GeoDataFrame,
     file_type: Union[str, list] = None,
@@ -321,11 +322,11 @@ def store_lidar_to_db(
     df_to_db = gen_lidar_data(gdf_tile, file_path, file_type)
     df_to_db["created_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %X")
     df_to_db = df_to_db[["uuid", "file_path", "created_at"]]
-    create_table(engine, LIDAR)
+    create_table(conn, LIDAR)
     df_to_db.to_sql(
-        "lidar", engine, index=False, index_label="uuid", if_exists="append"
+        "lidar", conn, index=False, index_label="uuid", if_exists="append"
     )
-    deduplicate_table(engine, LIDAR, "file_path")
+    deduplicate_table(conn, LIDAR, "file_path")
     return df_to_db["file_path"].nunique()
 
 
@@ -342,7 +343,7 @@ def check_file_number(data_path: Union[str, pathlib.Path], expect: int) -> None:
         )
 
 
-def store_data_to_db(engine: Engine, data_path: Union[str, pathlib.Path]) -> None:
+def store_data_to_db(conn: Connection, data_path: Union[str, pathlib.Path]) -> None:
     """store tile and lidar data info into database."""
     count = 0
     runtime = []
@@ -355,8 +356,8 @@ def store_data_to_db(engine: Engine, data_path: Union[str, pathlib.Path]) -> Non
             and len(utils.get_files([".laz", ".las"], file_path)) > 0
             and len(utils.get_files(".zip", file_path)) > 0
         ):
-            gdf = store_tile_to_db(engine, file_path)
-            count += store_lidar_to_db(engine, file_path, gdf)
+            gdf = store_tile_to_db(conn, file_path)
+            count += store_lidar_to_db(conn, file_path, gdf)
         else:
             logger.debug(f"No cloud point file in {file_path}, ignore it.")
         end = datetime.now()
@@ -365,8 +366,8 @@ def store_data_to_db(engine: Engine, data_path: Union[str, pathlib.Path]) -> Non
         f"Total runtime: {sum(runtime, timedelta(0, 0))}\n"
         f"Runtime for each dataset:{json.dumps(runtime, indent=2, default=str)}"
     )
-    # check_table_duplication(engine, TILE, 'dataset', 'file_name')
-    # check_table_duplication(engine, LIDAR, 'file_path')
+    # check_table_duplication(conn, TILE, 'dataset', 'file_name')
+    # check_table_duplication(conn, LIDAR, 'file_path')
     check_file_number(data_path, count)
 
 
@@ -389,47 +390,48 @@ def run(
     :param buffer: buffer distance for roi_gdf.
     """
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    lidar_dir = pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
-    data_path = data_dir / lidar_dir
-    if isinstance(
-        roi_id, (int, str, list)
-    ):  # catch_id get higher priority then roi_gdf and roi_file
-        dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
-        catch_path = data_dir / dem_dir
-        roi_gdf = get_roi_from_id(roi_id, catch_path)
-    if name_base:
-        if roi_gdf is not None and not roi_gdf.empty:
-            _, _, _, dataset = utils.retrieve_dataset(
-                engine, boundary_df=roi_gdf, buffer=buffer
-            )
-        elif pathlib.Path(roi_file).exists():
-            _, _, _, dataset = utils.retrieve_dataset(
-                engine, boundary_file=roi_file, buffer=buffer
-            )
+    with engine.connect() as conn:
+        data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
+        lidar_dir = pathlib.Path(utils.get_env_variable("LIDAR_DIR"))
+        data_path = data_dir / lidar_dir
+        if isinstance(
+            roi_id, (int, str, list)
+        ):  # catch_id get higher priority then roi_gdf and roi_file
+            dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
+            catch_path = data_dir / dem_dir
+            roi_gdf = get_roi_from_id(roi_id, catch_path)
+        if name_base:
+            if roi_gdf is not None and not roi_gdf.empty:
+                _, _, _, dataset = utils.retrieve_dataset(
+                    conn, boundary_df=roi_gdf, buffer=buffer
+                )
+            elif pathlib.Path(roi_file).exists():
+                _, _, _, dataset = utils.retrieve_dataset(
+                    conn, boundary_file=roi_file, buffer=buffer
+                )
+            else:
+                logger.info(f"Use all dataset name to download lidar data.")
+                gdf = read_postgres_table(conn, DATASET)
+                dataset = sorted(gdf["name"].tolist())
+            # filter out Waikato dataset
+            dataset = [name for name in dataset if "LiDAR_" not in name]
+            if len(dataset) < 1:
+                logger.warning(
+                    f"No dataset found in the region of interest, please check the input parameters."
+                )
+                engine.dispose()
+                gc.collect()
+                return
+            get_lidar_data(data_path, dataset=dataset)
         else:
-            logger.info(f"Use all dataset name to download lidar data.")
-            gdf = read_postgres_table(engine, DATASET)
-            dataset = sorted(gdf["name"].tolist())
-        # filter out Waikato dataset
-        dataset = [name for name in dataset if "LiDAR_" not in name]
-        if len(dataset) < 1:
-            logger.warning(
-                f"No dataset found in the region of interest, please check the input parameters."
-            )
-            engine.dispose()
-            gc.collect()
-            return
-        get_lidar_data(data_path, dataset=dataset)
-    else:
-        if roi_id is None and pathlib.Path(roi_file).exists():
-            roi_gdf = get_roi_from_file(roi_file)
-        if roi_gdf is not None and not roi_gdf.empty:
-            get_lidar_data(data_path, gdf=roi_gdf)
-        else:
-            raise ValueError(f"Input parameters are not correct.")
-    if not download_only:
-        store_data_to_db(engine, data_path)
+            if roi_id is None and pathlib.Path(roi_file).exists():
+                roi_gdf = get_roi_from_file(roi_file)
+            if roi_gdf is not None and not roi_gdf.empty:
+                get_lidar_data(data_path, gdf=roi_gdf)
+            else:
+                raise ValueError(f"Input parameters are not correct.")
+        if not download_only:
+            store_data_to_db(conn, data_path)
     engine.dispose()
     gc.collect()
 

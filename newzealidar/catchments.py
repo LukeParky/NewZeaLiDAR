@@ -15,7 +15,7 @@ import geopandas as gpd
 import pandas as pd
 import shapely
 from geoapis.vector import WfsQueryBase
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection
 
 from newzealidar import tables
 from newzealidar import utils
@@ -103,12 +103,12 @@ def fetch_data_from_mfe(
     return vector_fetcher.run(layer)
 
 
-def gen_source_catchment_table(engine: Engine, gpkg: bool = False) -> None:
+def gen_source_catchment_table(conn: Connection, gpkg: bool = False) -> None:
     """
     fetching catchment data from data.mfe.govt.nz and save to local database
     current version fetches sea draining catchments, order 5 catchments, order 4 catchments.
 
-    :param engine: database engine
+    :param conn: database connection
     :param gpkg: save catchments to geopackage or not, default is True
     """
     logger.info("Fetch catchments data from data.mfe.govt.nz ...")
@@ -125,7 +125,7 @@ def gen_source_catchment_table(engine: Engine, gpkg: bool = False) -> None:
     for layer, table, column in zip(list_layers, list_tables, list_columns):
         gdf = fetch_data_from_mfe(layer)
         gdf = gdf[column].copy()
-        tables.create_catchment_table(engine, table, gdf, column)
+        tables.create_catchment_table(conn, table, gdf, column)
         logger.info(
             f"Finish fetching {table.__tablename__} data from data.mfe.govt.nz."
         )
@@ -141,10 +141,11 @@ def initiate_tables(gpkg: bool = False) -> None:
     :param gpkg: save catchments to geopackage or not, default is True
     """
     engine = utils.get_database()
-    # get data from data.mfe.govt.nz
-    gen_source_catchment_table(engine, gpkg)
-    # add other table initialization here:
-    # ...
+    with engine.connect() as conn:
+        # get data from data.mfe.govt.nz
+        gen_source_catchment_table(conn, gpkg)
+        # add other table initialization here:
+        # ...
     engine.dispose()
     gc.collect()
 
@@ -162,8 +163,9 @@ def check_duplicate_catchments(
     :param buffer: buffer distance, default is -10
     """
     engine = utils.get_database(null_pool=True)
-    # it will check duplicate and overlap catchments, so cannot utilise `desc` parameter for saving time.
-    gdf = tables.get_catchment_by_geometry(engine, table, gds, buffer=buffer)
+    with engine.connect() as conn:
+        # it will check duplicate and overlap catchments, so cannot utilise `desc` parameter for saving time.
+        gdf = tables.get_catchment_by_geometry(conn, table, gds, buffer=buffer)
     engine.dispose()
     gc.collect()
     assert (
@@ -196,7 +198,8 @@ def deduplicate_single_table(
     """
     logger.info(f"Start deduplicating table {source_table.__tablename__} ...")
     engine = utils.get_database()
-    gdf = tables.read_postgis_table(engine, source_table)
+    with engine.connect() as conn:
+        gdf = tables.read_postgis_table(conn, source_table)
     engine.dispose()
     gc.collect()
 
@@ -245,13 +248,14 @@ def deduplicate_single_table(
 
     gdf_to_db = tables.prepare_to_db(gdf_to_db)
     engine = utils.get_database()
-    gdf_to_db.to_postgis(
-        processed_table.__tablename__,
-        engine,
-        index=True,
-        if_exists="replace",
-        chunksize=4096,
-    )
+    with engine.connect() as conn:
+        gdf_to_db.to_postgis(
+            processed_table.__tablename__,
+            conn,
+            index=True,
+            if_exists="replace",
+            chunksize=4096,
+        )
     engine.dispose()
     gc.collect()
 
@@ -282,28 +286,29 @@ def extend_boundary(
     extend boundary of a catchment to adjacent catchments, to remove holes, silvers, and spikes between polygons.
     """
     engine = utils.get_database(null_pool=True)
-    # find adjacent catchments
-    list_adj_id = tables.get_adjacent_catchment_by_id(engine, table, index)
-    assert (
-        index in list_id and index in list_adj_id
-    ), f"Unexpected index: {index} not in {list_id} or {list_adj_id}"
-    i = list_id.index(index)
-    ignore = list_id[:i]
-    list_adj_id = [i for i in list_adj_id if i not in ignore]
-    if len(list_adj_id) < 2:
-        if len(list_adj_id) == 0:
-            logger.warning(
-                f"Find empty geometry catchment, catch_id: {index}, adjacent_id: {list_adj_id}"
-            )
-        if len(list_adj_id) == 1:
-            assert (
-                list_adj_id[0] == index
-            ), f"unexpected adjacent_id: {list_adj_id} of catch_id: {index}."
-            logger.debug(
-                f"{table.__tablename__}, "
-                f"Ignoring {i + 1:>5}th catchment, catch_id: {index:>8}, adjacent catch_id: {list_adj_id}"
-            )
-        gdf = tables.get_data_by_id(engine, table, index)
+    with engine.connect() as conn:
+        # find adjacent catchments
+        list_adj_id = tables.get_adjacent_catchment_by_id(conn, table, index)
+        assert (
+            index in list_id and index in list_adj_id
+        ), f"Unexpected index: {index} not in {list_id} or {list_adj_id}"
+        i = list_id.index(index)
+        ignore = list_id[:i]
+        list_adj_id = [i for i in list_adj_id if i not in ignore]
+        if len(list_adj_id) < 2:
+            if len(list_adj_id) == 0:
+                logger.warning(
+                    f"Find empty geometry catchment, catch_id: {index}, adjacent_id: {list_adj_id}"
+                )
+            if len(list_adj_id) == 1:
+                assert (
+                    list_adj_id[0] == index
+                ), f"unexpected adjacent_id: {list_adj_id} of catch_id: {index}."
+                logger.debug(
+                    f"{table.__tablename__}, "
+                    f"Ignoring {i + 1:>5}th catchment, catch_id: {index:>8}, adjacent catch_id: {list_adj_id}"
+                )
+            gdf = tables.get_data_by_id(conn, table, index)
         engine.dispose()
         gc.collect()
         return gdf
@@ -311,8 +316,8 @@ def extend_boundary(
         f"{table.__tablename__}, "
         f"Refining {i + 1:>5}th catchment, catch_id: {index:>8}, adjacent catch_id: {list_adj_id}"
     )
-    gdf = tables.get_data_by_id(engine, table, list_adj_id)
-    engine.dispose()
+    gdf = tables.get_data_by_id(conn, table, list_adj_id)
+    conn.dispose()
     gc.collect()
     # rest catchments - exclude the current index catchment
     gdf_r = gdf[gdf["catch_id"] != index]
@@ -350,10 +355,11 @@ def extend_catchments(
     extend boundary of catchments to adjacent catchments, to remove holes, silvers, and spikes between polygons.
     """
     logger.info(f"Extending catchment geometry in table {table.__tablename__}...")
-    engine = utils.get_database()
-    gdf = tables.read_postgis_table(
-        engine, table.__tablename__, sort_by="area", desc=True
-    )
+    conn = utils.get_database()
+    with conn.connect() as conn:
+        gdf = tables.read_postgis_table(
+            conn, table.__tablename__, sort_by="area", desc=True
+        )
     assert gdf.empty is False, f"unexpected empty table {table.__tablename__}."
     list_area = gdf["area"].to_list()[
         :10
@@ -384,12 +390,12 @@ def extend_catchments(
         utils.save_gpkg(gdf_result, table.__tablename__ + "_extended")
 
     gdf_to_db = tables.prepare_to_db(gdf_result)
-    engine = utils.get_database()
-    tables.create_table(engine, table)
+    conn = utils.get_database()
+    tables.create_table(conn, table)
     gdf_to_db.to_postgis(
-        table.__tablename__, engine, index=True, if_exists="replace", chunksize=4096
+        table.__tablename__, conn, index=True, if_exists="replace", chunksize=4096
     )
-    engine.dispose()
+    conn.dispose()
     gc.collect()
     logger.info(f"Finish extend catchments, save to table {table.__tablename__}.")
 
@@ -440,10 +446,11 @@ def find_gaps(
         logger.info(f"Save gaps to {table.__tablename__} table.")
         gdf_to_db = tables.prepare_to_db(gdf_result, check_empty=False)
         engine = utils.get_database()
-        tables.create_table(engine, table)
-        gdf_to_db.to_postgis(
-            table.__tablename__, engine, index=True, if_exists="replace", chunksize=1000
-        )
+        with engine.connect() as conn:
+            tables.create_table(conn, table)
+            gdf_to_db.to_postgis(
+                table.__tablename__, conn, index=True, if_exists="replace", chunksize=1000
+            )
         engine.dispose()
         gc.collect()
 
@@ -664,18 +671,19 @@ def align_single_catchment(index: int, table: Type[tables.Ttable]) -> gpd.GeoDat
     align input geometry with corresponding superior sea draining catchments.
     """
     engine = utils.get_database(null_pool=True)
-    gdf = tables.get_data_by_id(engine, table, index)
-    geom = gdf["geometry"].values[0]
+    with engine.connect() as conn:
+        gdf = tables.get_data_by_id(conn, table, index)
+        geom = gdf["geometry"].values[0]
 
-    # align with superior sea draining catchments
-    buffer = (
-        CATCHMENT_RESOLUTION * 3 + EPS
-        if utils.get_min_width(geom) > CATCHMENT_RESOLUTION * 3
-        else 10
-    )
-    gdf_sdc = tables.get_catchment_by_geometry(
-        engine, tables.SDCP, geom, buffer=-buffer
-    )
+        # align with superior sea draining catchments
+        buffer = (
+            CATCHMENT_RESOLUTION * 3 + EPS
+            if utils.get_min_width(geom) > CATCHMENT_RESOLUTION * 3
+            else 10
+        )
+        gdf_sdc = tables.get_catchment_by_geometry(
+            conn, tables.SDCP, geom, buffer=-buffer
+        )
     assert len(gdf_sdc) <= 1, (
         f"Find multiple superior sea draining catchments {gdf_sdc['catch_id'].to_list()} "
         f"for {table.__tablename__} {index}."
@@ -775,35 +783,36 @@ def refine_catchments(
 
     logger.info(f"Refining table {table.__tablename__} catchments data...")
     engine = utils.get_database()
-    gdf = tables.read_postgis_table(
-        engine, table.__tablename__, sort_by="area", desc=True
-    )
-    merge_threshold = tables.get_min_value(engine, tables.SDC, "area")
-
-    if trim:
-        logger.info(f"Trimming {table.__tablename__} catchments ...")
-        gdf, update_sum = trim_catchments(gdf, parallel=parallel)
-        logger.info(
-            f"Finish trimming {table.__tablename__} catchments, trimmed {update_sum} catchments."
+    with engine.connect() as conn:
+        gdf = tables.read_postgis_table(
+            conn, table.__tablename__, sort_by="area", desc=True
         )
+        merge_threshold = tables.get_min_value(conn, tables.SDC, "area")
+
+        if trim:
+            logger.info(f"Trimming {table.__tablename__} catchments ...")
+            gdf, update_sum = trim_catchments(gdf, parallel=parallel)
+            logger.info(
+                f"Finish trimming {table.__tablename__} catchments, trimmed {update_sum} catchments."
+            )
+
+            if gpkg:
+                utils.save_gpkg(gdf, table.__tablename__ + "_trimmed")
+
+        # find gaps between catchments and merge them into its largest adjacent catchments
+        gdf_gaps = find_gaps(gdf, table=GAP_TABLE_MAPPING[table.__tablename__], gpkg=gpkg)
+        gdf = pd.concat([gdf, gdf_gaps], ignore_index=True)
+        gdf = gdf.sort_values(by="area", ascending=False).reset_index(drop=True)
+        gdf = merge_catchments(gdf, upper_area=merge_threshold)
 
         if gpkg:
-            utils.save_gpkg(gdf, table.__tablename__ + "_trimmed")
+            utils.save_gpkg(gdf, table.__tablename__ + "_refined")
 
-    # find gaps between catchments and merge them into its largest adjacent catchments
-    gdf_gaps = find_gaps(gdf, table=GAP_TABLE_MAPPING[table.__tablename__], gpkg=gpkg)
-    gdf = pd.concat([gdf, gdf_gaps], ignore_index=True)
-    gdf = gdf.sort_values(by="area", ascending=False).reset_index(drop=True)
-    gdf = merge_catchments(gdf, upper_area=merge_threshold)
-
-    if gpkg:
-        utils.save_gpkg(gdf, table.__tablename__ + "_refined")
-
-    gdf_to_db = tables.prepare_to_db(gdf)
-    tables.create_table(engine, table)
-    gdf_to_db.to_postgis(
-        table.__tablename__, engine, index=True, if_exists="replace", chunksize=4096
-    )
+        gdf_to_db = tables.prepare_to_db(gdf)
+        tables.create_table(conn, table)
+        gdf_to_db.to_postgis(
+            table.__tablename__, conn, index=True, if_exists="replace", chunksize=4096
+        )
     engine.dispose()
     gc.collect()
     logger.info(
@@ -825,7 +834,8 @@ def refine_sub_catchments(
     for table in list_table:
         logger.info(f"Refining {table.__tablename__} catchments...")
         engine = utils.get_database()
-        gdf_sub = tables.read_postgis_table(engine, table.__tablename__)
+        with engine.connect() as conn:
+            gdf_sub = tables.read_postgis_table(conn, table.__tablename__)
         engine.dispose()
         gc.collect()
 
@@ -849,10 +859,11 @@ def refine_sub_catchments(
 
         gdf_to_db = tables.prepare_to_db(gdf_sub)
         engine = utils.get_database()
-        tables.create_table(engine, table)
-        gdf_to_db.to_postgis(
-            table.__tablename__, engine, index=True, if_exists="replace", chunksize=4096
-        )
+        with engine.connect() as conn:
+            tables.create_table(conn, table)
+            gdf_to_db.to_postgis(
+                table.__tablename__, conn, index=True, if_exists="replace", chunksize=4096
+            )
         engine.dispose()
         gc.collect()
         logger.info(
@@ -877,60 +888,61 @@ def gen_coast_catchments(
     """
     logger.info("Generating coast catchments table...")
     engine = utils.get_database()
-    # get catchments geometry
-    gdf_catchments = tables.read_postgis_table(engine, tables.CATCHMENT.__tablename__)
-    geom_catchments = utils.filter_geometry(
-        gdf_catchments["geometry"].copy(),
-        resolution=CATCHMENT_RESOLUTION,
-        polygon_threshold=lower_area,
-    )
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    land_path = pathlib.Path(utils.get_env_variable("LAND_FILE"))
-    gdf_land = gpd.read_file(data_dir / land_path)
-    gdf_land = gdf_land.to_crs(epsg=2193)
-    geom_land_ex = gdf_land["geometry"].buffer(coast_distance).unary_union
-    geom_coast = geom_land_ex.difference(geom_catchments)
-    geom_coast = utils.filter_geometry(
-        geom_coast,
-        resolution=CATCHMENT_RESOLUTION,
-        polygon_threshold=lower_area,
-        hole_threshold=100 * 100,
-    )
-    # cut into grid catchments
-    list_fishnet = utils.fishnet(geom_coast, threshold=COAST_GRID)
-    gdf_grid = gpd.GeoDataFrame(
-        index=range(COAST_OFFSET, COAST_OFFSET + len(list_fishnet)),
-        crs="epsg:2193",
-        geometry=list_fishnet,
-    )
-    gdf_grid = gdf_grid.reset_index().rename(columns={"index": "catch_id"})
-    gdf_grid["area"] = gdf_grid["geometry"].area
-    gdf_grid = gdf_grid[["catch_id", "area", "geometry"]]
+    with engine.connect() as conn:
+        # get catchments geometry
+        gdf_catchments = tables.read_postgis_table(conn, tables.CATCHMENT.__tablename__)
+        geom_catchments = utils.filter_geometry(
+            gdf_catchments["geometry"].copy(),
+            resolution=CATCHMENT_RESOLUTION,
+            polygon_threshold=lower_area,
+        )
+        data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
+        land_path = pathlib.Path(utils.get_env_variable("LAND_FILE"))
+        gdf_land = gpd.read_file(data_dir / land_path)
+        gdf_land = gdf_land.to_crs(epsg=2193)
+        geom_land_ex = gdf_land["geometry"].buffer(coast_distance).unary_union
+        geom_coast = geom_land_ex.difference(geom_catchments)
+        geom_coast = utils.filter_geometry(
+            geom_coast,
+            resolution=CATCHMENT_RESOLUTION,
+            polygon_threshold=lower_area,
+            hole_threshold=100 * 100,
+        )
+        # cut into grid catchments
+        list_fishnet = utils.fishnet(geom_coast, threshold=COAST_GRID)
+        gdf_grid = gpd.GeoDataFrame(
+            index=range(COAST_OFFSET, COAST_OFFSET + len(list_fishnet)),
+            crs="epsg:2193",
+            geometry=list_fishnet,
+        )
+        gdf_grid = gdf_grid.reset_index().rename(columns={"index": "catch_id"})
+        gdf_grid["area"] = gdf_grid["geometry"].area
+        gdf_grid = gdf_grid[["catch_id", "area", "geometry"]]
 
-    if gpkg:
-        utils.save_gpkg(gdf_grid, tables.COAST)
+        if gpkg:
+            utils.save_gpkg(gdf_grid, tables.COAST)
 
-    gdf_to_db = tables.prepare_to_db(gdf_grid)
-    tables.create_table(engine, tables.COAST)
-    gdf_to_db.to_postgis(
-        tables.COAST.__tablename__, engine, index=True, if_exists="replace"
-    )
+        gdf_to_db = tables.prepare_to_db(gdf_grid)
+        tables.create_table(conn, tables.COAST)
+        gdf_to_db.to_postgis(
+            tables.COAST.__tablename__, conn, index=True, if_exists="replace"
+        )
 
-    gdf = pd.concat([gdf_catchments, gdf_grid], ignore_index=True)
-    gdf = gdf.sort_values(by=["catch_id"]).reset_index(drop=True)
+        gdf = pd.concat([gdf_catchments, gdf_grid], ignore_index=True)
+        gdf = gdf.sort_values(by=["catch_id"]).reset_index(drop=True)
 
-    # always save to gpkg for checking
-    utils.save_gpkg(gdf, tables.CATCHMENT)
+        # always save to gpkg for checking
+        utils.save_gpkg(gdf, tables.CATCHMENT)
 
-    gdf_to_db = tables.prepare_to_db(gdf)
-    tables.create_table(engine, tables.CATCHMENT)
-    gdf_to_db.to_postgis(
-        tables.CATCHMENT.__tablename__,
-        engine,
-        index=True,
-        if_exists="replace",
-        chunksize=4096,
-    )
+        gdf_to_db = tables.prepare_to_db(gdf)
+        tables.create_table(conn, tables.CATCHMENT)
+        gdf_to_db.to_postgis(
+            tables.CATCHMENT.__tablename__,
+            conn,
+            index=True,
+            if_exists="replace",
+            chunksize=4096,
+        )
     engine.dispose()
     gc.collect()
     logger.info(
@@ -945,7 +957,7 @@ def gen_coast_catchments(
 
 
 def find_subordinate(
-    engine: Engine,
+    conn: Connection,
     table: Union[Type[tables.Ttable], str],
     geometry: shapely.Geometry,
     buffer: Union[int, float] = CATCHMENT_RESOLUTION,
@@ -953,7 +965,7 @@ def find_subordinate(
     """
     Search for subordinate catchments in a table
 
-    :param engine: database engine
+    :param conn: database conn
     :param table: table name
     :param geometry: geometry to search
     :param buffer: buffer distance for search geometry to ensure the subordinate catchments are included
@@ -962,7 +974,7 @@ def find_subordinate(
     geometry = shapely.buffer(geometry, buffer, join_style="mitre")
     query = f"""SELECT * FROM {table} WHERE
                 ST_Within(geometry, ST_SetSRID('{geometry}'::geometry, 2193)) ;"""
-    gdf = gpd.read_postgis(query, engine, geom_col="geometry", crs="epsg:2193")
+    gdf = gpd.read_postgis(query, conn, geom_col="geometry", crs="epsg:2193")
     if gdf.empty:
         logger.warning(f"No subordinate catchments found in Table {table}")
     return gdf
@@ -978,73 +990,42 @@ def split_catchment(gds: Union[pd.Series, gpd.GeoSeries]) -> tuple:
     logger.info(f"Splitting {gds['catch_id']:>8}, starting...")
     buffer = CATCHMENT_RESOLUTION * 20  # adjustable if needed
     engine = utils.get_database(null_pool=True)
-    gdf_order5 = find_subordinate(
-        engine, tables.ORDER5P.__tablename__, gds["geometry"], buffer
-    )
-    gdf_order5 = (
-        gdf_order5[gdf_order5["area"] < UPPER_AREA]
-        if not gdf_order5.empty
-        else gdf_order5
-    )
-    # return to collect the split catchments together
-    gdf_concat = gpd.GeoDataFrame(geometry=gpd.GeoSeries())
-    # recorde steps
-    step = 1
+    with engine.connect() as conn:
+        gdf_order5 = find_subordinate(
+            conn, tables.ORDER5P.__tablename__, gds["geometry"], buffer
+        )
+        gdf_order5 = (
+            gdf_order5[gdf_order5["area"] < UPPER_AREA]
+            if not gdf_order5.empty
+            else gdf_order5
+        )
+        # return to collect the split catchments together
+        gdf_concat = gpd.GeoDataFrame(geometry=gpd.GeoSeries())
+        # recorde steps
+        step = 1
 
-    if gdf_order5.empty:
-        logger.debug(
-            f"Splitting {gds['catch_id']:>8}, step {step}: order5 fail,\torder 4 trying..."
-        )
-        geom_dif = utils.filter_geometry(
-            gds["geometry"],
-            resolution=CATCHMENT_RESOLUTION,
-            polygon_threshold=LOWER_AREA,
-        )
-        rest_area = gds["area"]
-    else:
-        logger.debug(
-            f"Splitting {gds['catch_id']:>8}, "
-            f"step {step}: order5 success:\t{gdf_order5['catch_id'].to_list()}"
-        )
-        gdf_concat = pd.concat([gdf_concat, gdf_order5], ignore_index=True)
-        geom = utils.filter_geometry(
-            gdf_order5["geometry"].copy(),
-            resolution=CATCHMENT_RESOLUTION,
-            polygon_threshold=LOWER_AREA,
-        )
-        geom_dif = gds["geometry"].difference(geom)
-        geom_dif = utils.filter_geometry(
-            geom_dif, resolution=CATCHMENT_RESOLUTION, polygon_threshold=LOWER_AREA
-        )
-        rest_area = geom_dif.area
-
-    step += 1
-    if rest_area > UPPER_AREA:
-        gdf_order4 = find_subordinate(
-            engine, tables.ORDER4P.__tablename__, geom_dif, buffer
-        )
-        gdf_order4 = (
-            gdf_order4[gdf_order4["area"] < UPPER_AREA]
-            if not gdf_order4.empty
-            else gdf_order4
-        )
-        if gdf_order4.empty:
-            logger.warning(
-                f"Splitting {gds['catch_id']:>8}, "
-                f"step {step}: downgrade fail,\tstraight line cutting..."
-            )
-        else:
+        if gdf_order5.empty:
             logger.debug(
-                f"Splitting {gds['catch_id']:>8}, "
-                f"step {step}: order4 success:\t{gdf_order4['catch_id'].to_list()}"
+                f"Splitting {gds['catch_id']:>8}, step {step}: order5 fail,\torder 4 trying..."
             )
-            gdf_concat = pd.concat([gdf_concat, gdf_order4], ignore_index=True)
-            geom = utils.filter_geometry(
-                gdf_order4["geometry"].copy(),
+            geom_dif = utils.filter_geometry(
+                gds["geometry"],
                 resolution=CATCHMENT_RESOLUTION,
                 polygon_threshold=LOWER_AREA,
             )
-            geom_dif = geom_dif.difference(geom)
+            rest_area = gds["area"]
+        else:
+            logger.debug(
+                f"Splitting {gds['catch_id']:>8}, "
+                f"step {step}: order5 success:\t{gdf_order5['catch_id'].to_list()}"
+            )
+            gdf_concat = pd.concat([gdf_concat, gdf_order5], ignore_index=True)
+            geom = utils.filter_geometry(
+                gdf_order5["geometry"].copy(),
+                resolution=CATCHMENT_RESOLUTION,
+                polygon_threshold=LOWER_AREA,
+            )
+            geom_dif = gds["geometry"].difference(geom)
             geom_dif = utils.filter_geometry(
                 geom_dif, resolution=CATCHMENT_RESOLUTION, polygon_threshold=LOWER_AREA
             )
@@ -1052,31 +1033,63 @@ def split_catchment(gds: Union[pd.Series, gpd.GeoSeries]) -> tuple:
 
         step += 1
         if rest_area > UPPER_AREA:
-            list_katana = []
-            for geom in geom_dif.geoms:
-                list_result = utils.katana(geom, threshold=UPPER_AREA)
-                list_katana.extend(list_result)
-            gdf_rest = gpd.GeoDataFrame(
-                index=range(len(list_katana)), crs="epsg:2193", geometry=list_katana
+            gdf_order4 = find_subordinate(
+                conn, tables.ORDER4P.__tablename__, geom_dif, buffer
             )
-            gdf_rest["area"] = gdf_rest["geometry"].area
-            gdf_rest = gdf_rest[
-                gdf_rest["area"] > LOWER_AREA * 20
-            ]  # ignore tiny polygons
-            gdf_rest = gdf_rest.sort_values(by="area", ascending=False).reset_index(
-                drop=True
+            gdf_order4 = (
+                gdf_order4[gdf_order4["area"] < UPPER_AREA]
+                if not gdf_order4.empty
+                else gdf_order4
             )
-            gdf_rest["catch_id"] = (
-                gds["catch_id"] * SPLIT_SHIFT + SPLIT_OFFSET + gdf_rest.index.values
-            )
-            gdf_rest = gdf_rest[["catch_id", "area", "geometry"]]
-            logger.debug(
-                f"Splitting {gds['catch_id']:>8}, "
-                f"step {step}: residue done:\t{gdf_rest['catch_id'].to_list()}"
-            )
-            gdf_concat = pd.concat([gdf_concat, gdf_rest], ignore_index=True)
-            gdf_split = gdf_concat.copy()
-            gdf_split["super_id"] = gds["catch_id"]
+            if gdf_order4.empty:
+                logger.warning(
+                    f"Splitting {gds['catch_id']:>8}, "
+                    f"step {step}: downgrade fail,\tstraight line cutting..."
+                )
+            else:
+                logger.debug(
+                    f"Splitting {gds['catch_id']:>8}, "
+                    f"step {step}: order4 success:\t{gdf_order4['catch_id'].to_list()}"
+                )
+                gdf_concat = pd.concat([gdf_concat, gdf_order4], ignore_index=True)
+                geom = utils.filter_geometry(
+                    gdf_order4["geometry"].copy(),
+                    resolution=CATCHMENT_RESOLUTION,
+                    polygon_threshold=LOWER_AREA,
+                )
+                geom_dif = geom_dif.difference(geom)
+                geom_dif = utils.filter_geometry(
+                    geom_dif, resolution=CATCHMENT_RESOLUTION, polygon_threshold=LOWER_AREA
+                )
+                rest_area = geom_dif.area
+
+            step += 1
+            if rest_area > UPPER_AREA:
+                list_katana = []
+                for geom in geom_dif.geoms:
+                    list_result = utils.katana(geom, threshold=UPPER_AREA)
+                    list_katana.extend(list_result)
+                gdf_rest = gpd.GeoDataFrame(
+                    index=range(len(list_katana)), crs="epsg:2193", geometry=list_katana
+                )
+                gdf_rest["area"] = gdf_rest["geometry"].area
+                gdf_rest = gdf_rest[
+                    gdf_rest["area"] > LOWER_AREA * 20
+                ]  # ignore tiny polygons
+                gdf_rest = gdf_rest.sort_values(by="area", ascending=False).reset_index(
+                    drop=True
+                )
+                gdf_rest["catch_id"] = (
+                    gds["catch_id"] * SPLIT_SHIFT + SPLIT_OFFSET + gdf_rest.index.values
+                )
+                gdf_rest = gdf_rest[["catch_id", "area", "geometry"]]
+                logger.debug(
+                    f"Splitting {gds['catch_id']:>8}, "
+                    f"step {step}: residue done:\t{gdf_rest['catch_id'].to_list()}"
+                )
+                gdf_concat = pd.concat([gdf_concat, gdf_rest], ignore_index=True)
+                gdf_split = gdf_concat.copy()
+                gdf_split["super_id"] = gds["catch_id"]
             engine.dispose()
             gc.collect()
             return gdf_concat, gdf_split
@@ -1096,7 +1109,7 @@ def split_catchment(gds: Union[pd.Series, gpd.GeoSeries]) -> tuple:
     )
     gdf_split = gdf_concat.copy()
     gdf_split["super_id"] = gds["catch_id"]
-    engine.dispose()
+    conn.dispose()
     gc.collect()
     return gdf_concat, gdf_split
 
@@ -1111,21 +1124,21 @@ def gen_catchment_table(parallel: bool = True, gpkg: bool = False) -> None:
     :return: None
     """
     logger.info("Generating catchment table content...")
-    engine = utils.get_database()
+    conn = utils.get_database()
     # area up limit that can be processed by server for the limit of memory
     # fetch smaller catchments to be saved to catchment table
     gdf_to_db = tables.get_catchment_by_area_range(
-        engine, tables.SDCP, upper_area=UPPER_AREA, lower_area=None
+        conn, tables.SDCP, upper_area=UPPER_AREA, lower_area=None
     )
     # records split catchments information for debugging
     gdf_split = gpd.GeoDataFrame(geometry=gpd.GeoSeries())
     # fetch larger catchments to be split to subordinate catchments
     gdf_to_split = tables.get_catchment_by_area_range(
-        engine, tables.SDCP, upper_area=None, lower_area=UPPER_AREA
+        conn, tables.SDCP, upper_area=None, lower_area=UPPER_AREA
     )
     assert gdf_to_db.empty is False, f"{tables.SDCP.__tablename__} table is empty!"
     assert gdf_to_split.empty is False, f"{tables.SDCP.__tablename__} table is empty!"
-    engine.dispose()
+    conn.dispose()
     gc.collect()
 
     logger.info(
@@ -1152,24 +1165,25 @@ def gen_catchment_table(parallel: bool = True, gpkg: bool = False) -> None:
         utils.save_gpkg(gdf_split, tables.SDCS)
 
     engine = utils.get_database()
-    gdf_to_db = tables.prepare_to_db(gdf_to_db)
-    tables.create_table(engine, tables.CATCHTEMP)
-    gdf_to_db.to_postgis(
-        tables.CATCHTEMP.__tablename__,
-        engine,
-        index=True,
-        if_exists="replace",
-        chunksize=4096,
-    )
-    logger.info(f"Save split catchments to {tables.CATCHTEMP.__tablename__} table.")
-    gdf_split = tables.prepare_to_db(gdf_split, check_empty=False)
-    tables.create_table(engine, tables.SDCS)
-    gdf_split.to_postgis(
-        tables.SDCS.__tablename__, engine, index=True, if_exists="replace"
-    )
-    logger.info(
-        f"Save split catchments superior-subordinate mapping to {tables.SDCS.__tablename__} table."
-    )
+    with engine.connect() as conn:
+        gdf_to_db = tables.prepare_to_db(gdf_to_db)
+        tables.create_table(conn, tables.CATCHTEMP)
+        gdf_to_db.to_postgis(
+            tables.CATCHTEMP.__tablename__,
+            conn,
+            index=True,
+            if_exists="replace",
+            chunksize=4096,
+        )
+        logger.info(f"Save split catchments to {tables.CATCHTEMP.__tablename__} table.")
+        gdf_split = tables.prepare_to_db(gdf_split, check_empty=False)
+        tables.create_table(conn, tables.SDCS)
+        gdf_split.to_postgis(
+            tables.SDCS.__tablename__, conn, index=True, if_exists="replace"
+        )
+        logger.info(
+            f"Save split catchments superior-subordinate mapping to {tables.SDCS.__tablename__} table."
+        )
     engine.dispose()
     gc.collect()
 
@@ -1185,7 +1199,6 @@ def gen_grid_table(
     :return: None
     """
     logger.info("Generating grid table content...")
-    engine = utils.get_database()
 
     data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
     land_path = pathlib.Path(utils.get_env_variable("LAND_FILE"))
@@ -1206,13 +1219,15 @@ def gen_grid_table(
         utils.save_gpkg(gdf_grid, tables.GRID)
     gdf_to_db = tables.prepare_to_db(gdf_grid)
     gdf_to_db.index.rename("grid_id", inplace=True)
-    tables.create_table(engine, tables.GRID)
-    gdf_to_db.to_postgis(
-        tables.GRID.__tablename__, engine, index=True, if_exists="replace"
-    )
-    logger.info(
-        f"Save grid partition to {tables.GRID.__tablename__} table."
-    )
+    engine = utils.get_database()
+    with engine.connect() as conn:
+        tables.create_table(conn, tables.GRID)
+        gdf_to_db.to_postgis(
+            tables.GRID.__tablename__, conn, index=True, if_exists="replace"
+        )
+        logger.info(
+            f"Save grid partition to {tables.GRID.__tablename__} table."
+        )
     engine.dispose()
     gc.collect()
 

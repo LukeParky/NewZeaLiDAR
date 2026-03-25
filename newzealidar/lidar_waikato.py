@@ -10,7 +10,7 @@ from typing import Union
 
 import geopandas as gpd
 import pandas as pd
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection
 
 from newzealidar import utils
 from newzealidar.lidar import store_lidar_to_db, check_file_number
@@ -66,7 +66,7 @@ def gen_tile_data(gdf_in: gpd.GeoDataFrame, dataset: str) -> gpd.GeoDataFrame:
     return gdf
 
 
-def store_tile_to_db(engine: Engine, dataset: str, tile_path: str) -> gpd.GeoDataFrame:
+def store_tile_to_db(conn: Connection, dataset: str, tile_path: str) -> gpd.GeoDataFrame:
     """
     Store tile information to tile table.
     Load the zip file where tile info are stored as shape file,
@@ -74,7 +74,7 @@ def store_tile_to_db(engine: Engine, dataset: str, tile_path: str) -> gpd.GeoDat
     """
     zip_file = utils.get_files("_TileIndex.zip", tile_path, expect=1)
     gdf_from_zip = gpd.GeoDataFrame.from_file("zip://" + zip_file)
-    dataset_geom = utils.get_geometry_from_db(engine, DATASET, "name", dataset)
+    dataset_geom = utils.get_geometry_from_db(conn, DATASET, "name", dataset)
     # only keep the tiles that intersect with the dataset,
     # because some dataset (LiDAR_2007_2008_*) share the same tile index file.
     gdf_from_zip = gdf_from_zip[gdf_from_zip.intersects(dataset_geom)]
@@ -86,16 +86,16 @@ def store_tile_to_db(engine: Engine, dataset: str, tile_path: str) -> gpd.GeoDat
     gdf_to_db = gdf_to_db[
         ["uuid", "dataset", "file_name", "source", "geometry", "created_at"]
     ]
-    create_table(engine, TILE)
+    create_table(conn, TILE)
     gdf_to_db.to_postgis(
-        "tile", engine, index=False, index_label="uuid", if_exists="append"
+        "tile", conn, index=False, index_label="uuid", if_exists="append"
     )
-    deduplicate_table(engine, TILE, "dataset", "file_name")
+    deduplicate_table(conn, TILE, "dataset", "file_name")
     return gdf_to_db
 
 
 def store_data_to_db(
-    engine: Engine, data_path: Union[str, pathlib.Path], dataset_info: dict
+    conn: Connection, data_path: Union[str, pathlib.Path], dataset_info: dict
 ) -> None:
     """store tile and lidar data into database."""
     count = 0
@@ -103,8 +103,8 @@ def store_data_to_db(
         dataset_info["name"], dataset_info["tile_dir"], dataset_info["dataset_dir"]
     ):
         logger.info(f"*** Processing {dataset} dataset ***")
-        gdf = store_tile_to_db(engine, dataset, tile_dir)
-        count += store_lidar_to_db(engine, dataset_dir, gdf, file_type=".laz")
+        gdf = store_tile_to_db(conn, dataset, tile_dir)
+        count += store_lidar_to_db(conn, dataset_dir, gdf, file_type=".laz")
     check_file_number(data_path, count)
 
 
@@ -208,8 +208,9 @@ def run(dataset_info: dict = None) -> None:
         utils.get_env_variable("WAIKATO_DIR")
     )
     engine = utils.get_database()
-    check_file_identity(dataset_info, ".laz")
-    store_data_to_db(engine, data_path, dataset_info)
+    with engine.connect() as conn:
+        check_file_identity(dataset_info, ".laz")
+        store_data_to_db(conn, data_path, dataset_info)
     engine.dispose()
 
 

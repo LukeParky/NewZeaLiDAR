@@ -120,6 +120,8 @@ class ExtraFilesPipeline(FilesPipeline):
 
     def file_path(self, request, response=None, info=None, *, item=None):
         """Rename downloaded files."""
+        logger.info("FILE_PATH STARTED")
+        print("FILE_PATH STARTED")
         end_str = request.url[-3:]
         if end_str == "xml":
             directory = pathlib.Path(item["meta_path"]).parent
@@ -136,69 +138,72 @@ class ExtraFilesPipeline(FilesPipeline):
 
     def item_completed(self, results, item, info):
         """Save crawled data to database."""
+        logger.info("ITEM COMPLETED STARTED")
+        print("ITEM COMPLETED STARTED")
         if item["private"]:
             logger.warning(f'Private dataset: {item["name"]} is not saved to database.')
             return item
         engine = utils.get_database(null_pool=True)
-        create_table(engine, DATASET)
-        timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %X")
-        data = {
-            "id": "-1",
-            "name": item["name"],
-            # 'ot_id': item['ot_id'],
-            "describe": item["describe"],
-            # 'collector': item['collector'],
-            "survey_start_date": item["survey_start_date"],
-            "survey_end_date": item["survey_end_date"],
-            "publication_date": item["publication_date"],
-            "point_cloud_density": item["point_cloud_density"],
-            "original_datum": item["datum"],
-            "meta_path": item["meta_path"],
-            "meta_source": item["file_urls"][0],
-            "extent_path": item["extent_path"],
-            # 'extent_source': item['file_urls'][1],
-            "tile_path": item["tile_path"],
-            "geometry": [get_extent_geometry(item)],
-            "created_at": timestamp,
-            "updated_at": timestamp,
-        }
-        gdf_to_db = gpd.GeoDataFrame(data, crs="epsg:2193", geometry="geometry")
-        query = (
-            f"""SELECT * FROM {DATASET.__tablename__} WHERE name = '{item["name"]}' ;"""
-        )
-        gdf_from_db = gpd.read_postgis(query, engine, geom_col="geometry")
-        if gdf_from_db.empty:
-            _id = get_max_value(engine, "dataset")
-            gdf_to_db["id"] = _id + 1 if _id else 1
-        else:
-            delete_table(engine, DATASET, "name", item["name"])
-            # keep the 'created_at', 'id' and update the rest columns.
-            gdf_to_db["id"] = gdf_from_db["id"].copy()
-            gdf_to_db["created_at"] = gdf_from_db["created_at"].copy()
-        gdf_to_db = gdf_to_db[
-            [
-                "id",
-                "name",
-                # 'ot_id',
-                "describe",
-                "survey_start_date",
-                "survey_end_date",
-                "publication_date",
-                "point_cloud_density",
-                "original_datum",
-                # 'collector',
-                "meta_path",
-                "meta_source",
-                "extent_path",
-                # 'extent_source',
-                "tile_path",
-                "geometry",
-                "created_at",
-                "updated_at",
+        with engine.connect() as conn:
+            create_table(conn, DATASET)
+            timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %X")
+            data = {
+                "id": "-1",
+                "name": item["name"],
+                # 'ot_id': item['ot_id'],
+                "describe": item["describe"],
+                # 'collector': item['collector'],
+                "survey_start_date": item["survey_start_date"],
+                "survey_end_date": item["survey_end_date"],
+                "publication_date": item["publication_date"],
+                "point_cloud_density": item["point_cloud_density"],
+                "original_datum": item["datum"],
+                "meta_path": item["meta_path"],
+                "meta_source": item["file_urls"][0],
+                "extent_path": item["extent_path"],
+                # 'extent_source': item['file_urls'][1],
+                "tile_path": item["tile_path"],
+                "geometry": [get_extent_geometry(item)],
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            }
+            gdf_to_db = gpd.GeoDataFrame(data, crs="epsg:2193", geometry="geometry")
+            query = (
+                f"""SELECT * FROM {DATASET.__tablename__} WHERE name = '{item["name"]}' ;"""
+            )
+            gdf_from_db = gpd.read_postgis(query, conn, geom_col="geometry")
+            if gdf_from_db.empty:
+                _id = get_max_value(conn, "dataset")
+                gdf_to_db["id"] = _id + 1 if _id else 1
+            else:
+                delete_table(conn, DATASET, "name", item["name"])
+                # keep the 'created_at', 'id' and update the rest columns.
+                gdf_to_db["id"] = gdf_from_db["id"].copy()
+                gdf_to_db["created_at"] = gdf_from_db["created_at"].copy()
+            gdf_to_db = gdf_to_db[
+                [
+                    "id",
+                    "name",
+                    # 'ot_id',
+                    "describe",
+                    "survey_start_date",
+                    "survey_end_date",
+                    "publication_date",
+                    "point_cloud_density",
+                    "original_datum",
+                    # 'collector',
+                    "meta_path",
+                    "meta_source",
+                    "extent_path",
+                    # 'extent_source',
+                    "tile_path",
+                    "geometry",
+                    "created_at",
+                    "updated_at",
+                ]
             ]
-        ]
-        gdf_to_db.to_postgis("dataset", engine, index=False, if_exists="append")
-        # check_table_duplication(engine, DATASET, 'name')
+            gdf_to_db.to_postgis("dataset", conn, index=False, if_exists="append")
+            # check_table_duplication(conn, DATASET, 'name')
         engine.dispose()
         gc.collect()
         return item
@@ -402,7 +407,8 @@ def run():
     instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
     # generate dataset mapping info
     engine = utils.get_database()
-    utils.map_dataset_name(engine, instructions_file)
+    with engine.connect() as conn:
+        utils.map_dataset_name(conn, instructions_file)
     engine.dispose()
     gc.collect()
     logger.info("Finish processing datasets by scrapy.")
@@ -417,11 +423,14 @@ def main(gdf=None, log_level="INFO"):
     instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
     # generate dataset mapping info
     engine = utils.get_database()
-    utils.map_dataset_name(engine, instructions_file)
+    with engine.connect() as conn:
+        utils.map_dataset_name(conn, instructions_file)
     engine.dispose()
     gc.collect()
     logger.info("Finish processing datasets by scrapy.")
 
 
 if __name__ == "__main__":
-    run()
+    import logs
+    logs.setup_logging2()
+    main()

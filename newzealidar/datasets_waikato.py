@@ -12,7 +12,8 @@ from typing import Union
 import geopandas as gpd
 import pandas as pd
 from fiona.drvsupport import supported_drivers
-from sqlalchemy.engine import Engine
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 from newzealidar import utils
 from newzealidar.tables import (
@@ -43,7 +44,7 @@ def get_extent_info(extent_file: Union[str, pathlib.Path]) -> gpd.GeoDataFrame:
 
 
 def store_dataset_to_db(
-    engine: Engine,
+    conn: Connection,
     data_path: Union[str, pathlib.Path],
     gdf: gpd.GeoDataFrame,
     dataset_dict: dict,
@@ -51,7 +52,7 @@ def store_dataset_to_db(
     """
     store dataset information to database.
 
-    :param engine: database engine
+    :param conn: database conn
     :param data_path: dataset path
     :param gdf: dataset extent information from kml file
     :param dataset_dict: input dataset information
@@ -96,20 +97,20 @@ def store_dataset_to_db(
         )
     timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %X")
     gdf_to_db["updated_at"] = timestamp
-    create_table(engine, DATASET)
+    create_table(conn, DATASET)
     # suppose always len(gdf_to_db) > 1, if len(gdf_to_db) == 1, the query is not correct.
     query = f"""SELECT id, name, created_at FROM {DATASET.__tablename__}
                 WHERE name in {repr(tuple(map(str, gdf_to_db['name'].to_list())))} ;"""
-    df_from_db = pd.read_sql(query, engine)
+    df_from_db = pd.read_sql(query, conn)
     if df_from_db.empty:
-        _id = get_max_value(engine, "dataset")
+        _id = get_max_value(conn, "dataset")
         init_id = _id + 1 if _id else 1
         gdf_to_db["id"] = range(init_id, init_id + len(gdf_to_db))
         gdf_to_db["created_at"] = timestamp
     else:
         query = f"""DELETE FROM {DATASET.__tablename__}
                     WHERE name in {repr(tuple(map(str, df_from_db['name'].to_list())))};"""
-        engine.execute(query)
+        conn.execute(text(query))
         gdf_to_db = gdf_to_db.merge(df_from_db, on=["name"], how="left")
         assert (
             gdf_to_db["name"].to_list().sort() == df_from_db["name"].to_list().sort()
@@ -130,7 +131,7 @@ def store_dataset_to_db(
             "updated_at",
         ]
     ]
-    gdf_to_db.to_postgis(DATASET.__tablename__, engine, if_exists="append", index=False)
+    gdf_to_db.to_postgis(DATASET.__tablename__, conn, if_exists="append", index=False)
 
 
 def run(dataset_info: dict = None) -> None:
@@ -188,13 +189,14 @@ def run(dataset_info: dict = None) -> None:
             ],
         }
     engine = utils.get_database()
-    data_path = pathlib.Path(utils.get_env_variable("DATA_DIR")) / pathlib.Path(
-        utils.get_env_variable("WAIKATO_DIR")
-    )
-    kml_path = data_path / pathlib.Path("LiDAR_Regional_Extent.kml")
-    gdf = get_extent_info(kml_path)
-    store_dataset_to_db(engine, data_path, gdf, dataset_info)
-    check_table_duplication(engine, DATASET, "name")
+    with conn.connect() as conn:
+        data_path = pathlib.Path(utils.get_env_variable("DATA_DIR")) / pathlib.Path(
+            utils.get_env_variable("WAIKATO_DIR")
+        )
+        kml_path = data_path / pathlib.Path("LiDAR_Regional_Extent.kml")
+        gdf = get_extent_info(kml_path)
+        store_dataset_to_db(conn, data_path, gdf, dataset_info)
+        check_table_duplication(conn, DATASET, "name")
     engine.dispose()
     logger.info("Waikato LiDAR dataset information is saved to database.")
 

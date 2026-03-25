@@ -19,7 +19,8 @@ from typing import Union
 import geopandas as gpd
 import pandas as pd
 from geofabrics import processor
-from sqlalchemy.engine import Engine
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 from newzealidar import utils
 from newzealidar.tables import (
@@ -62,7 +63,7 @@ def save_instructions(instructions: dict, instructions_path: str) -> None:
 
 
 def gen_instructions(
-    engine: Engine,
+    conn: Connection,
     instructions: dict,
     index: int,
     mode: str = "api",
@@ -116,7 +117,7 @@ def gen_instructions(
         instructions["instructions"]["datasets"]["lidar"][
             "open_topography"
         ] = utils.retrieve_dataset(
-            engine, catchment_boundary_file, "survey_end_date", buffer=buffer
+            conn, catchment_boundary_file, "survey_end_date", buffer=buffer
         )[
             0
         ]
@@ -125,7 +126,7 @@ def gen_instructions(
         instructions["instructions"]["datasets"]["lidar"][
             "local"
         ] = utils.retrieve_lidar(
-            engine, catchment_boundary_file, "survey_end_date", buffer=buffer
+            conn, catchment_boundary_file, "survey_end_date", buffer=buffer
         )
         instructions["instructions"]["datasets"]["lidar"]["open_topography"] = {}
     # for debug
@@ -149,7 +150,7 @@ def gen_hydro_dem(instructions: dict) -> None:
 
 
 def single_process(
-    engine: Engine,
+    conn: Connection,
     instructions: dict,
     index: int,
     mode: str = "api",
@@ -161,7 +162,7 @@ def single_process(
         f"\n\n******* Processing {index} in {mode} mode with geometry buffer {buffer} *******"
     )
     single_instructions = gen_instructions(
-        engine, instructions, index, mode=mode, grid=grid, buffer=buffer
+        conn, instructions, index, mode=mode, grid=grid, buffer=buffer
     )
     result_path = pathlib.Path(
         single_instructions["instructions"]["data_paths"]["local_cache"]
@@ -206,7 +207,7 @@ def single_process(
 
 
 def store_hydro_to_db(
-    engine: Engine, instructions: dict, user_dem: bool = False
+    conn: Connection, instructions: dict, user_dem: bool = False
 ) -> None:
     """save hydrological conditioned dem to database in hydro table."""
     assert len(instructions) > 0, "instructions is empty dictionary."
@@ -238,7 +239,7 @@ def store_hydro_to_db(
 
     # save to hydrologically conditioned DEM table
     if user_dem:  # for user define catchment
-        create_table(engine, USERDEM)
+        create_table(conn, USERDEM)
         resolution = instructions["instructions"]["output"]["grid_params"]["resolution"]
         raw_geometry = gpd.read_file(raw_extent_path, Driver="GeoJSON").geometry[0]
         geometry = gpd.read_file(extent_path, Driver="GeoJSON").geometry[0]
@@ -261,12 +262,12 @@ def store_hydro_to_db(
                     '{geometry}',
                     '{timestamp}'
                     ) ;"""
-        engine.execute(query)
+        conn.execute(text(query))
         logger.info(f"Add new {index} in {USERDEM.__tablename__} at {timestamp}.")
     else:  # for catchment table
-        create_table(engine, DEM)
+        create_table(conn, DEM)
         query = f"SELECT * FROM {DEM.__tablename__} WHERE catch_id = '{index}' ;"
-        df_from_db = pd.read_sql(query, engine)
+        df_from_db = pd.read_sql(query, conn)
         if not df_from_db.empty:
             query = f"""UPDATE {DEM.__tablename__}
                         SET raw_dem_path = '{raw_dem_path}',
@@ -274,7 +275,7 @@ def store_hydro_to_db(
                             extent_path = '{extent_path}',
                             updated_at = '{timestamp}'
                         WHERE catch_id = '{index}' ;"""
-            engine.execute(query)
+            conn.execute(text(query))
             logger.info(f"Updated {index} in {DEM.__tablename__} at {timestamp}.")
         else:
             query = f"""INSERT INTO {DEM.__tablename__} (
@@ -292,17 +293,17 @@ def store_hydro_to_db(
                         '{timestamp}',
                         '{timestamp}'
                         ) ;"""
-            engine.execute(query)
+            conn.execute(text(query))
 
         # hydrologically conditioned DEM geometry table, to faster query
-        create_table(engine, DEMATTR)
+        create_table(conn, DEMATTR)
         resolution = instructions["instructions"]["output"]["grid_params"]["resolution"]
         raw_geometry = gpd.read_file(raw_extent_path, Driver="GeoJSON").geometry[0]
         geometry = gpd.read_file(extent_path, Driver="GeoJSON").geometry[0]
         query = (
             f"SELECT catch_id FROM {DEMATTR.__tablename__} WHERE catch_id = '{index}' ;"
         )
-        df_from_db = pd.read_sql(query, engine)
+        df_from_db = pd.read_sql(query, conn)
         if not df_from_db.empty:
             query = f"""UPDATE {DEMATTR.__tablename__}
                         SET raw_geometry = '{raw_geometry}',
@@ -310,7 +311,7 @@ def store_hydro_to_db(
                             geometry = '{geometry}',
                             updated_at = '{timestamp}'
                         WHERE catch_id = '{index}' ;"""
-            engine.execute(query)
+            conn.execute(text(query))
             logger.info(f"Updated {index} in {DEMATTR.__tablename__} at {timestamp}.")
         else:
             query = f"""INSERT INTO {DEMATTR.__tablename__} (
@@ -328,12 +329,12 @@ def store_hydro_to_db(
                         '{timestamp}',
                         '{timestamp}'
                         ) ;"""
-            engine.execute(query)
+            conn.execute(text(query))
         logger.info(f"Add new {index} in {DEMATTR.__tablename__} at {timestamp}.")
-    # check_table_duplication(engine, table, 'catch_id')
+    # check_table_duplication(conn, table, 'catch_id')
 
 
-def store_grid_to_db(engine: Engine, instructions: dict) -> None:
+def store_grid_to_db(conn: Connection, instructions: dict) -> None:
     """save hydrological conditioned dem to database in hydro table."""
     assert len(instructions) > 0, "instructions is empty dictionary."
     index = os.path.basename(instructions["instructions"]["data_paths"]["subfolder"])
@@ -356,16 +357,16 @@ def store_grid_to_db(engine: Engine, instructions: dict) -> None:
     assert os.path.exists(raw_extent_path), f"File {raw_extent_path} not exist."
     timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %X")
 
-    create_table(engine, GRIDDEM)
+    create_table(conn, GRIDDEM)
     query = f"SELECT * FROM {GRIDDEM.__tablename__} WHERE grid_id = '{index}' ;"
-    df_from_db = pd.read_sql(query, engine)
+    df_from_db = pd.read_sql(query, conn)
     if not df_from_db.empty:
         query = f"""UPDATE {GRIDDEM.__tablename__}
                     SET raw_dem_path = '{raw_dem_path}',
                         extent_path = '{extent_path}',
                         updated_at = '{timestamp}'
                     WHERE grid_id = '{index}' ;"""
-        engine.execute(query)
+        conn.execute(text(query))
         logger.info(f"Updated {index} in {GRIDDEM.__tablename__} at {timestamp}.")
     else:
         query = f"""INSERT INTO {GRIDDEM.__tablename__} (
@@ -381,17 +382,17 @@ def store_grid_to_db(engine: Engine, instructions: dict) -> None:
                     '{timestamp}',
                     '{timestamp}'
                     ) ;"""
-        engine.execute(query)
+        conn.execute(text(query))
 
     # Grid DEM geometry table, to faster query
-    create_table(engine, GRIDDEMATTR)
+    create_table(conn, GRIDDEMATTR)
     resolution = instructions["instructions"]["output"]["grid_params"]["resolution"]
     raw_geometry = gpd.read_file(raw_extent_path, Driver="GeoJSON").geometry[0]
     geometry = gpd.read_file(extent_path, Driver="GeoJSON").geometry[0]
     query = (
         f"SELECT grid_id FROM {GRIDDEMATTR.__tablename__} WHERE grid_id = '{index}' ;"
     )
-    df_from_db = pd.read_sql(query, engine)
+    df_from_db = pd.read_sql(query, conn)
     if not df_from_db.empty:
         query = f"""UPDATE {GRIDDEMATTR.__tablename__}
                     SET raw_geometry = '{raw_geometry}',
@@ -399,7 +400,7 @@ def store_grid_to_db(engine: Engine, instructions: dict) -> None:
                         geometry = '{geometry}',
                         updated_at = '{timestamp}'
                     WHERE grid_id = '{index}' ;"""
-        engine.execute(query)
+        conn.execute(text(query))
         logger.info(f"Updated {index} in {GRIDDEMATTR.__tablename__} at {timestamp}.")
     else:
         query = f"""INSERT INTO {GRIDDEMATTR.__tablename__} (
@@ -417,9 +418,9 @@ def store_grid_to_db(engine: Engine, instructions: dict) -> None:
                     '{timestamp}',
                     '{timestamp}'
                     ) ;"""
-        engine.execute(query)
+        conn.execute(text(query))
     logger.info(f"Add new {index} in {GRIDDEMATTR.__tablename__} at {timestamp}.")
-    # check_table_duplication(engine, table, 'catch_id')
+    # check_table_duplication(conn, table, 'catch_id')
 
 
 # for Digital-Twins
@@ -458,77 +459,78 @@ def main(
         assert index.isdigit(), f"User define catchment index {index} is not digit."
     logger.info(f"Start Catchment {index} processing...")
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
-    result_dir = data_dir / dem_dir
-    if isinstance(catchment_boundary, str):
-        # read geojson string, not a file
-        catchment_boundary = gpd.read_file(catchment_boundary, driver="GeoJSON")
-        if "2193" not in str(catchment_boundary.crs):
-            catchment_boundary = catchment_boundary.to_crs(2193)
+    with engine.connect() as conn:
+        data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
+        dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
+        result_dir = data_dir / dem_dir
+        if isinstance(catchment_boundary, str):
+            # read geojson string, not a file
+            catchment_boundary = gpd.read_file(catchment_boundary, driver="GeoJSON")
+            if "2193" not in str(catchment_boundary.crs):
+                catchment_boundary = catchment_boundary.to_crs(2193)
 
-    # check if catchment already exist in hydro_dem table, pass
-    if check_dem_exist:
-        gdf, table_name = utils.check_roi_dem_exist(engine, catchment_boundary)
-        if table_name:
-            logger.info(
-                "The DEM for this ROI already is already covered by another DEM in the database, " \
-                f"DEM {gdf['catch_id'][0]}"
-            )
-            # Select the newest row in the gdf
-            gdf = gdf.sort_values(by=["created_at"]).iloc[[0]]
-            # Extract shapely polygon, since we know there is only one polygon from check_roi_dem_exist we can simplify
-            catchment_polygon = catchment_boundary["geometry"][0]
-            if table_name == USERDEM.__tablename__ and (gdf.area - catchment_polygon.area).iloc[0] > 10:
-                # We can clip the DEM here so that it is processed and ready to be read
-                utils.clip_dem(engine, gdf, catchment_polygon, index=index)
-            return
-
-    lidar_extent_file = (
-        pathlib.Path(utils.get_env_variable("DATA_DIR"))
-        / pathlib.Path("gpkg")
-        / pathlib.Path("lidar_extent.gpkg")
-    )
-    if lidar_extent_file.exists():
-        lidar_extent = gpd.read_file(lidar_extent_file, driver="GPKG")
-    else:
-        # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
-        lidar_extent = utils.gen_table_extent(engine, DATASET)
-        # save lidar extent to check on QGIS
-        utils.save_gpkg(lidar_extent, "lidar_extent")
-    if lidar_extent.buffer(buffer).intersects(catchment_boundary).any():
-        geojson_file = (
-            pathlib.Path(result_dir)
-            / pathlib.Path(f"{index}")
-            / pathlib.Path(f"{index}.geojson")
-        )
-        geojson_file.parent.mkdir(parents=True, exist_ok=True)
-        if not pathlib.Path(geojson_file).exists():
-            utils.gen_boundary_file(result_dir, catchment_boundary, index)
-        instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
-        with open(instructions_file, "r") as f:
-            instructions = json.loads(f.read())
-        try:
-            single_instructions = single_process(
-                engine, instructions, index, mode="api", buffer=buffer
-            )
-            if single_instructions:
-                store_hydro_to_db(engine, single_instructions, user_dem=True)
-                logger.info(f"Catchment {index} finished.")
-            else:
-                logger.warning(
-                    f"Catchment {index} failed. No instructions generated. Please check."
+        # check if catchment already exist in hydro_dem table, pass
+        if check_dem_exist:
+            gdf, table_name = utils.check_roi_dem_exist(conn, catchment_boundary)
+            if table_name:
+                logger.info(
+                    "The DEM for this ROI already is already covered by another DEM in the database, " \
+                    f"DEM {gdf['catch_id'][0]}"
                 )
-        except Exception as e:
-            logger.exception(f"Catchment {index} failed. Error message:\n{e}")
-            logger.error(
-                f"Catchment {index} failed. Running instructions:"
-                f"\n{json.dumps(instructions, indent=2, default=str)}"
+                # Select the newest row in the gdf
+                gdf = gdf.sort_values(by=["created_at"]).iloc[[0]]
+                # Extract shapely polygon, since we know there is only one polygon from check_roi_dem_exist we can simplify
+                catchment_polygon = catchment_boundary["geometry"][0]
+                if table_name == USERDEM.__tablename__ and (gdf.area - catchment_polygon.area).iloc[0] > 10:
+                    # We can clip the DEM here so that it is processed and ready to be read
+                    utils.clip_dem(conn, gdf, catchment_polygon, index=index)
+                return
+
+        lidar_extent_file = (
+            pathlib.Path(utils.get_env_variable("DATA_DIR"))
+            / pathlib.Path("gpkg")
+            / pathlib.Path("lidar_extent.gpkg")
+        )
+        if lidar_extent_file.exists():
+            lidar_extent = gpd.read_file(lidar_extent_file, driver="GPKG")
+        else:
+            # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
+            lidar_extent = utils.gen_table_extent(conn, DATASET)
+            # save lidar extent to check on QGIS
+            utils.save_gpkg(lidar_extent, "lidar_extent")
+        if lidar_extent.buffer(buffer).intersects(catchment_boundary).any():
+            geojson_file = (
+                pathlib.Path(result_dir)
+                / pathlib.Path(f"{index}")
+                / pathlib.Path(f"{index}.geojson")
             )
-            if exit_if_error:
-                raise e  # DigitalTwins want to exit process if there is an error during the process
-            else:
-                pass
+            geojson_file.parent.mkdir(parents=True, exist_ok=True)
+            if not pathlib.Path(geojson_file).exists():
+                utils.gen_boundary_file(result_dir, catchment_boundary, index)
+            instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+            with open(instructions_file, "r") as f:
+                instructions = json.loads(f.read())
+            try:
+                single_instructions = single_process(
+                    conn, instructions, index, mode="api", buffer=buffer
+                )
+                if single_instructions:
+                    store_hydro_to_db(conn, single_instructions, user_dem=True)
+                    logger.info(f"Catchment {index} finished.")
+                else:
+                    logger.warning(
+                        f"Catchment {index} failed. No instructions generated. Please check."
+                    )
+            except Exception as e:
+                logger.exception(f"Catchment {index} failed. Error message:\n{e}")
+                logger.error(
+                    f"Catchment {index} failed. Running instructions:"
+                    f"\n{json.dumps(instructions, indent=2, default=str)}"
+                )
+                if exit_if_error:
+                    raise e  # DigitalTwins want to exit process if there is an error during the process
+                else:
+                    pass
         engine.dispose()
         gc.collect()
 
@@ -556,159 +558,159 @@ def run(
     :param update: if True, run and update the existing dem in `hydro_dem` table, else pass if dem exist.
     :param gpkg: if True, save the hydrological conditioned dem as geopackage.
     """
-    engine = utils.get_database()
     data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
     dem_dir = pathlib.Path(utils.get_env_variable("DEM_DIR"))
     catch_path = data_dir / dem_dir
     instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
     with open(instructions_file, "r") as f:
         instructions = json.loads(f.read())
+    engine = utils.get_database()
+    with engine.connect() as conn:
+        if catch_id is not None:
+            if isinstance(catch_id, str):
+                assert catch_id.isdigit(), "Input catch_id must be integer string."
+            catch_id = catch_id if isinstance(catch_id, list) else [catch_id]
+            catch_id = [int(i) for i in catch_id]
+            _gdf = pd.read_sql(f"SELECT catch_id FROM {SDC.__tablename__} ;", conn)
+            sdc_id = sorted(_gdf["catch_id"].to_list())
+            _gdf = pd.read_sql(f"SELECT catch_id FROM {CATCHMENT.__tablename__} ;", conn)
+            catchment_id = sorted(_gdf["catch_id"].to_list())
+            new_id = []
+            for i in catch_id:
+                if i in catchment_id:  # small catchment
+                    new_id.append(i)
+                elif (
+                    i in sdc_id and i not in catchment_id
+                ):  # large catchment, search subordinates
+                    _list = get_split_catchment_by_id(conn, i, sub=True)
+                    if len(_list) > 0:
+                        new_id.extend(_list)
+                        logger.debug(
+                            f"Catchment {i} split to {len(_list)} subordinates {_list}."
+                        )
+                    else:
+                        logger.warning(
+                            f"Catchment {i} is not in `catchment` table, "
+                            f"please check if it is duplicated or overlap with other catchments."
+                        )
+                else:
+                    logger.warning(f"Catchment {i} is not in catchment table, ignore it.")
+            catch_id = new_id
+            logger.debug(f"check catch_id: pass.")
+        elif area is not None:
+            catch_id = get_id_under_area(conn, SDC, area)
+            logger.info(
+                f"There are {len(catch_id)} Catchments that area is under {area} m2"
+            )
+        else:
+            _gdf = pd.read_sql(f"SELECT catch_id FROM {CATCHMENT.__tablename__} ;", conn)
+            catch_id = sorted(_gdf["catch_id"].to_list())
+            logger.info(
+                f"******* FULL CATCHMENTS MODE ********* {len(catch_id)} Catchments DEM in total."
+            )
 
-    if catch_id is not None:
-        if isinstance(catch_id, str):
-            assert catch_id.isdigit(), "Input catch_id must be integer string."
-        catch_id = catch_id if isinstance(catch_id, list) else [catch_id]
-        catch_id = [int(i) for i in catch_id]
-        _gdf = pd.read_sql(f"SELECT catch_id FROM {SDC.__tablename__} ;", engine)
-        sdc_id = sorted(_gdf["catch_id"].to_list())
-        _gdf = pd.read_sql(f"SELECT catch_id FROM {CATCHMENT.__tablename__} ;", engine)
-        catchment_id = sorted(_gdf["catch_id"].to_list())
-        new_id = []
+        # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
+        lidar_extent = utils.gen_table_extent(conn, DATASET)
+        # save lidar extent to check on QGIS
+        utils.save_gpkg(lidar_extent, "lidar_extent")
+
+        if start is not None:
+            if int(start) in catch_id:
+                start_index = catch_id.index(int(start))
+                catch_id = catch_id[start_index:]
+            else:
+                logger.info(f"Input start index {start} is not in catch_id list.")
+                catch_id = sorted([x for x in catch_id if x > int(start)])
+
+        runtime = []
+        failed = []
+
+        logger.info(
+            f"******* Start process from catch_id {sorted(catch_id)[0]} to {sorted(catch_id)[-1]} *********"
+        )
         for i in catch_id:
-            if i in catchment_id:  # small catchment
-                new_id.append(i)
-            elif (
-                i in sdc_id and i not in catchment_id
-            ):  # large catchment, search subordinates
-                _list = get_split_catchment_by_id(engine, i, sub=True)
-                if len(_list) > 0:
-                    new_id.extend(_list)
-                    logger.debug(
-                        f"Catchment {i} split to {len(_list)} subordinates {_list}."
+            # to check if catchment boundary of RoI within lidar extent
+            catchment_boundary = get_data_by_id(conn, CATCHMENT, i)
+            # to check if already exist in hydro_dem table, if exist_ok, run and update, else pass
+            create_table(conn, DEM)
+            exist_ok = (get_data_by_id(conn, DEM, i, geom_col="")).empty or update
+
+            if (
+                lidar_extent.buffer(buffer).intersects(catchment_boundary).any()
+                and exist_ok
+            ):
+                # generate catchment boundary file for each catchment
+                utils.gen_boundary_file(catch_path, catchment_boundary, i)
+                # generate hydrological conditioned dem for each catchment
+                t_start = datetime.now()
+                try:
+                    single_instructions = single_process(
+                        conn, instructions, i, mode=mode, buffer=buffer
                     )
+                except Exception as e:
+                    logger.exception(f"Catchment {i} failed. Error message:\n{e}")
+                    logger.error(
+                        f"Catchment {i} failed. Running instructions:"
+                        f"\n{json.dumps(instructions, indent=2, default=str)}"
+                    )
+                    failed.append(i)
+                    continue
+                t_end = datetime.now()
+                if single_instructions:
+                    store_hydro_to_db(conn, single_instructions)
                 else:
-                    logger.warning(
-                        f"Catchment {i} is not in `catchment` table, "
-                        f"please check if it is duplicated or overlap with other catchments."
+                    logger.error(
+                        f"Catchment {i} failed. No instructions generated. Please check."
                     )
-            else:
-                logger.warning(f"Catchment {i} is not in catchment table, ignore it.")
-        catch_id = new_id
-        logger.debug(f"check catch_id: pass.")
-    elif area is not None:
-        catch_id = get_id_under_area(engine, SDC, area)
-        logger.info(
-            f"There are {len(catch_id)} Catchments that area is under {area} m2"
-        )
-    else:
-        _gdf = pd.read_sql(f"SELECT catch_id FROM {CATCHMENT.__tablename__} ;", engine)
-        catch_id = sorted(_gdf["catch_id"].to_list())
-        logger.info(
-            f"******* FULL CATCHMENTS MODE ********* {len(catch_id)} Catchments DEM in total."
-        )
+                    failed.append(i)
+                    continue
+                logger.info(f"Catchment {i} finished. Runtime: {t_end - t_start}")
+                runtime.append(t_end - t_start)
 
-    # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
-    lidar_extent = utils.gen_table_extent(engine, DATASET)
-    # save lidar extent to check on QGIS
-    utils.save_gpkg(lidar_extent, "lidar_extent")
-
-    if start is not None:
-        if int(start) in catch_id:
-            start_index = catch_id.index(int(start))
-            catch_id = catch_id[start_index:]
-        else:
-            logger.info(f"Input start index {start} is not in catch_id list.")
-            catch_id = sorted([x for x in catch_id if x > int(start)])
-
-    runtime = []
-    failed = []
-
-    logger.info(
-        f"******* Start process from catch_id {sorted(catch_id)[0]} to {sorted(catch_id)[-1]} *********"
-    )
-    for i in catch_id:
-        # to check if catchment boundary of RoI within lidar extent
-        catchment_boundary = get_data_by_id(engine, CATCHMENT, i)
-        # to check if already exist in hydro_dem table, if exist_ok, run and update, else pass
-        create_table(engine, DEM)
-        exist_ok = (get_data_by_id(engine, DEM, i, geom_col="")).empty or update
-
-        if (
-            lidar_extent.buffer(buffer).intersects(catchment_boundary).any()
-            and exist_ok
-        ):
-            # generate catchment boundary file for each catchment
-            utils.gen_boundary_file(catch_path, catchment_boundary, i)
-            # generate hydrological conditioned dem for each catchment
-            t_start = datetime.now()
-            try:
-                single_instructions = single_process(
-                    engine, instructions, i, mode=mode, buffer=buffer
-                )
-            except Exception as e:
-                logger.exception(f"Catchment {i} failed. Error message:\n{e}")
-                logger.error(
-                    f"Catchment {i} failed. Running instructions:"
-                    f"\n{json.dumps(instructions, indent=2, default=str)}"
-                )
-                failed.append(i)
-                continue
-            t_end = datetime.now()
-            if single_instructions:
-                store_hydro_to_db(engine, single_instructions)
-            else:
-                logger.error(
-                    f"Catchment {i} failed. No instructions generated. Please check."
-                )
-                failed.append(i)
-                continue
-            logger.info(f"Catchment {i} finished. Runtime: {t_end - t_start}")
-            runtime.append(t_end - t_start)
-
-            # save lidar extent to check on QGIS
-            if gpkg:
-                gpkg_file = (
-                    pathlib.Path(utils.get_env_variable("DATA_DIR"))
-                    / pathlib.Path("gpkg")
-                    / pathlib.Path("dem_extent.gpkg")
-                )
-                if gpkg_file.exists():
-                    exist_extent = gpd.read_file(gpkg_file, driver="GPKG")
-                    current_extent = gpd.read_file(
-                        pathlib.Path(
-                            single_instructions["instructions"]["data_paths"][
-                                "local_cache"
-                            ]
+                # save lidar extent to check on QGIS
+                if gpkg:
+                    gpkg_file = (
+                        pathlib.Path(utils.get_env_variable("DATA_DIR"))
+                        / pathlib.Path("gpkg")
+                        / pathlib.Path("dem_extent.gpkg")
+                    )
+                    if gpkg_file.exists():
+                        exist_extent = gpd.read_file(gpkg_file, driver="GPKG")
+                        current_extent = gpd.read_file(
+                            pathlib.Path(
+                                single_instructions["instructions"]["data_paths"][
+                                    "local_cache"
+                                ]
+                            )
+                            / pathlib.Path(
+                                single_instructions["instructions"]["data_paths"][
+                                    "subfolder"
+                                ]
+                            )
+                            / pathlib.Path(
+                                single_instructions["instructions"]["data_paths"][
+                                    "raw_dem_extents"
+                                ]
+                            ),
+                            driver="GeoJSON",
                         )
-                        / pathlib.Path(
-                            single_instructions["instructions"]["data_paths"][
-                                "subfolder"
-                            ]
+                        dem_extent = pd.concat(
+                            [exist_extent, current_extent], ignore_index=True
                         )
-                        / pathlib.Path(
-                            single_instructions["instructions"]["data_paths"][
-                                "raw_dem_extents"
-                            ]
-                        ),
-                        driver="GeoJSON",
-                    )
-                    dem_extent = pd.concat(
-                        [exist_extent, current_extent], ignore_index=True
-                    )
-                    dem_geom = utils.filter_geometry(dem_extent.unary_union)
-                    dem_extent = gpd.GeoDataFrame(
-                        index=[0], geometry=[dem_geom], crs=2193
-                    )
+                        dem_geom = utils.filter_geometry(dem_extent.unary_union)
+                        dem_extent = gpd.GeoDataFrame(
+                            index=[0], geometry=[dem_geom], crs=2193
+                        )
+                    else:
+                        dem_extent = utils.gen_table_extent(conn, DEM)
+                    utils.save_gpkg(dem_extent, "dem_extent")
+            else:
+                if exist_ok:
+                    logger.info(f"Catchment {i} is not within lidar extent, ignor it.")
                 else:
-                    dem_extent = utils.gen_table_extent(engine, DEM)
-                utils.save_gpkg(dem_extent, "dem_extent")
-        else:
-            if exist_ok:
-                logger.info(f"Catchment {i} is not within lidar extent, ignor it.")
-            else:
-                logger.info(
-                    f"Catchment {i} already exist in hydro_dem table, ignor it."
-                )
+                    logger.info(
+                        f"Catchment {i} already exist in hydro_dem table, ignor it."
+                    )
 
     if len(failed):
         logger.info(f"Failed {len(failed)} catchments: \n{failed}")
@@ -745,134 +747,135 @@ def run_grid(
     :param gpkg: if True, save the raw dem extent as geopackage.
     """
     engine = utils.get_database()
-    data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
-    dem_dir = pathlib.Path(utils.get_env_variable("GRID_DIR"))
-    grid_path = data_dir / dem_dir
-    instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
-    with open(instructions_file, "r") as f:
-        instructions = json.loads(f.read())
+    with conn.connect() as conn:
+        data_dir = pathlib.Path(utils.get_env_variable("DATA_DIR"))
+        dem_dir = pathlib.Path(utils.get_env_variable("GRID_DIR"))
+        grid_path = data_dir / dem_dir
+        instructions_file = pathlib.Path(utils.get_env_variable("INSTRUCTIONS_FILE"))
+        with open(instructions_file, "r") as f:
+            instructions = json.loads(f.read())
 
-    if boundary_path is not None:
-        gdf_boundary = gpd.read_file(boundary_path, driver="GeoJSON")
-        gdf_boundary.to_crs("epsg:2193", inplace=True)
-        gdf_grid = get_catchment_by_geometry(
-            engine, GRID, gdf_boundary, relation="ST_Intersects", buffer=buffer
-        )
-        grid_id = sorted(gdf_grid["grid_id"].to_list())
+        if boundary_path is not None:
+            gdf_boundary = gpd.read_file(boundary_path, driver="GeoJSON")
+            gdf_boundary.to_crs("epsg:2193", inplace=True)
+            gdf_grid = get_catchment_by_geometry(
+                conn, GRID, gdf_boundary, relation="ST_Intersects", buffer=buffer
+            )
+            grid_id = sorted(gdf_grid["grid_id"].to_list())
+            logger.info(
+                f"There are {len(grid_id)} Grids that intersect with ROI boundary.\n{grid_id}"
+            )
+
+        elif grid_id is not None:
+            if isinstance(grid_id, str):
+                assert grid_id.isdigit(), "Input grid_id must be integer string."
+            grid_id = grid_id if isinstance(grid_id, list) else [grid_id]
+            grid_id = [int(i) for i in grid_id]
+
+        else:
+            _gdf = pd.read_sql(f"SELECT grid_id FROM {GRID.__tablename__} ;", conn)
+            grid_id = sorted(_gdf["grid_id"].to_list())
+            logger.info(f"******* FULL GRID MODE ********* {len(grid_id)} GRID in total.")
+
+        # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
+        lidar_extent = utils.gen_table_extent(conn, DATASET)
+        # save lidar extent to check on QGIS
+        utils.save_gpkg(lidar_extent, "lidar_extent")
+
+        if start is not None:
+            if int(start) in grid_id:
+                start_index = grid_id.index(int(start))
+                grid_id = grid_id[start_index:]
+            else:
+                logger.info(f"Input start index {start} is not in grid_id list.")
+                grid_id = sorted([x for x in grid_id if x > int(start)])
+
+        runtime = []
+        failed = []
+        create_table(conn, GRIDDEM)
+
         logger.info(
-            f"There are {len(grid_id)} Grids that intersect with ROI boundary.\n{grid_id}"
+            f"******* Start process from grid_id {sorted(grid_id)[0]} to {sorted(grid_id)[-1]} *********"
         )
+        for i in grid_id:
+            # to check if catchment boundary of RoI within lidar extent
+            grid_boundary = get_data_by_id(conn, GRID, i, index_column="grid_id")
+            # to check if already exist in hydro_dem table, if exist_ok, run and update, else pass
+            exist_ok = (
+                get_data_by_id(conn, GRIDDEM, i, geom_col="", index_column="grid_id")
+            ).empty or update
 
-    elif grid_id is not None:
-        if isinstance(grid_id, str):
-            assert grid_id.isdigit(), "Input grid_id must be integer string."
-        grid_id = grid_id if isinstance(grid_id, list) else [grid_id]
-        grid_id = [int(i) for i in grid_id]
-
-    else:
-        _gdf = pd.read_sql(f"SELECT grid_id FROM {GRID.__tablename__} ;", engine)
-        grid_id = sorted(_gdf["grid_id"].to_list())
-        logger.info(f"******* FULL GRID MODE ********* {len(grid_id)} GRID in total.")
-
-    # generate lidar extent of all lidar datasets, to filter out catchments without lidar data
-    lidar_extent = utils.gen_table_extent(engine, DATASET)
-    # save lidar extent to check on QGIS
-    utils.save_gpkg(lidar_extent, "lidar_extent")
-
-    if start is not None:
-        if int(start) in grid_id:
-            start_index = grid_id.index(int(start))
-            grid_id = grid_id[start_index:]
-        else:
-            logger.info(f"Input start index {start} is not in grid_id list.")
-            grid_id = sorted([x for x in grid_id if x > int(start)])
-
-    runtime = []
-    failed = []
-    create_table(engine, GRIDDEM)
-
-    logger.info(
-        f"******* Start process from grid_id {sorted(grid_id)[0]} to {sorted(grid_id)[-1]} *********"
-    )
-    for i in grid_id:
-        # to check if catchment boundary of RoI within lidar extent
-        grid_boundary = get_data_by_id(engine, GRID, i, index_column="grid_id")
-        # to check if already exist in hydro_dem table, if exist_ok, run and update, else pass
-        exist_ok = (
-            get_data_by_id(engine, GRIDDEM, i, geom_col="", index_column="grid_id")
-        ).empty or update
-
-        if lidar_extent.buffer(buffer).intersects(grid_boundary).any() and exist_ok:
-            # generate grid boundary file for each grid
-            utils.gen_boundary_file(grid_path, grid_boundary, i)
-            # generate raw dem for each grid
-            t_start = datetime.now()
-            try:
-                single_instructions = single_process(
-                    engine, instructions, i, mode=mode, grid=True, buffer=buffer
-                )
-            except Exception as e:
-                logger.exception(f"Grid {i} failed. Error message:\n{e}")
-                logger.error(
-                    f"Grid {i} failed. Running instructions:"
-                    f"\n{json.dumps(instructions, indent=2, default=str)}"
-                )
-                failed.append(i)
-                continue
-            t_end = datetime.now()
-            if single_instructions:
-                store_grid_to_db(engine, single_instructions)
-            else:
-                logger.error(
-                    f"Grid {i} failed. No instructions generated. Please check."
-                )
-                failed.append(i)
-                continue
-            logger.info(f"Grid {i} finished. Runtime: {t_end - t_start}")
-            runtime.append(t_end - t_start)
-
-            # save lidar extent to check on QGIS
-            if gpkg:
-                gpkg_file = (
-                    pathlib.Path(utils.get_env_variable("DATA_DIR"))
-                    / pathlib.Path("gpkg")
-                    / pathlib.Path("grid_extent.gpkg")
-                )
-                if gpkg_file.exists():
-                    exist_extent = gpd.read_file(gpkg_file, driver="GPKG")
-                    current_extent = gpd.read_file(
-                        pathlib.Path(
-                            single_instructions["instructions"]["data_paths"][
-                                "local_cache"
-                            ]
-                        )
-                        / pathlib.Path(
-                            single_instructions["instructions"]["data_paths"][
-                                "subfolder"
-                            ]
-                        )
-                        / pathlib.Path(
-                            single_instructions["instructions"]["data_paths"][
-                                "raw_dem_extents"
-                            ]
-                        ),
-                        driver="GeoJSON",
+            if lidar_extent.buffer(buffer).intersects(grid_boundary).any() and exist_ok:
+                # generate grid boundary file for each grid
+                utils.gen_boundary_file(grid_path, grid_boundary, i)
+                # generate raw dem for each grid
+                t_start = datetime.now()
+                try:
+                    single_instructions = single_process(
+                        conn, instructions, i, mode=mode, grid=True, buffer=buffer
                     )
-                    dem_extent = pd.concat(
-                        [exist_extent, current_extent], ignore_index=True
+                except Exception as e:
+                    logger.exception(f"Grid {i} failed. Error message:\n{e}")
+                    logger.error(
+                        f"Grid {i} failed. Running instructions:"
+                        f"\n{json.dumps(instructions, indent=2, default=str)}"
                     )
-                    dem_geom = utils.filter_geometry(dem_extent.unary_union)
-                    dem_extent = gpd.GeoDataFrame(
-                        index=[0], geometry=[dem_geom], crs=2193
-                    )
+                    failed.append(i)
+                    continue
+                t_end = datetime.now()
+                if single_instructions:
+                    store_grid_to_db(conn, single_instructions)
                 else:
-                    dem_extent = utils.gen_table_extent(engine, GRIDDEM)
-                utils.save_gpkg(dem_extent, "grid_extent")
-        else:
-            if exist_ok:
-                logger.info(f"Grid {i} is not within lidar extent, ignor it.")
+                    logger.error(
+                        f"Grid {i} failed. No instructions generated. Please check."
+                    )
+                    failed.append(i)
+                    continue
+                logger.info(f"Grid {i} finished. Runtime: {t_end - t_start}")
+                runtime.append(t_end - t_start)
+
+                # save lidar extent to check on QGIS
+                if gpkg:
+                    gpkg_file = (
+                        pathlib.Path(utils.get_env_variable("DATA_DIR"))
+                        / pathlib.Path("gpkg")
+                        / pathlib.Path("grid_extent.gpkg")
+                    )
+                    if gpkg_file.exists():
+                        exist_extent = gpd.read_file(gpkg_file, driver="GPKG")
+                        current_extent = gpd.read_file(
+                            pathlib.Path(
+                                single_instructions["instructions"]["data_paths"][
+                                    "local_cache"
+                                ]
+                            )
+                            / pathlib.Path(
+                                single_instructions["instructions"]["data_paths"][
+                                    "subfolder"
+                                ]
+                            )
+                            / pathlib.Path(
+                                single_instructions["instructions"]["data_paths"][
+                                    "raw_dem_extents"
+                                ]
+                            ),
+                            driver="GeoJSON",
+                        )
+                        dem_extent = pd.concat(
+                            [exist_extent, current_extent], ignore_index=True
+                        )
+                        dem_geom = utils.filter_geometry(dem_extent.unary_union)
+                        dem_extent = gpd.GeoDataFrame(
+                            index=[0], geometry=[dem_geom], crs=2193
+                        )
+                    else:
+                        dem_extent = utils.gen_table_extent(conn, GRIDDEM)
+                    utils.save_gpkg(dem_extent, "grid_extent")
             else:
-                logger.info(f"Grid {i} already exist in grid_dem table, ignor it.")
+                if exist_ok:
+                    logger.info(f"Grid {i} is not within lidar extent, ignor it.")
+                else:
+                    logger.info(f"Grid {i} already exist in grid_dem table, ignor it.")
 
     if len(failed):
         logger.info(f"Failed {len(failed)} grads: \n{failed}")
