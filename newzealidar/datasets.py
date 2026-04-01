@@ -120,8 +120,6 @@ class ExtraFilesPipeline(FilesPipeline):
 
     def file_path(self, request, response=None, info=None, *, item=None):
         """Rename downloaded files."""
-        logger.info("FILE_PATH STARTED")
-        print("FILE_PATH STARTED")
         end_str = request.url[-3:]
         if end_str == "xml":
             directory = pathlib.Path(item["meta_path"]).parent
@@ -138,8 +136,6 @@ class ExtraFilesPipeline(FilesPipeline):
 
     def item_completed(self, results, item, info):
         """Save crawled data to database."""
-        logger.info("ITEM COMPLETED STARTED")
-        print("ITEM COMPLETED STARTED")
         if item["private"]:
             logger.warning(f'Private dataset: {item["name"]} is not saved to database.')
             return item
@@ -432,5 +428,4 @@ def main(gdf=None, log_level="INFO"):
 
 if __name__ == "__main__":
     import logs
-    logs.setup_logging2()
     main()

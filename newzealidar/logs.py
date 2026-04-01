@@ -70,62 +70,6 @@ def setup_logging(
     # add custom filters to the root logger
     logging.getLogger().addFilter(FilterRecords(module="dem"))
 
-def setup_logging2(log_level=logging.INFO):
-    # Define the logging format and date format
-    logging_format = "%(asctime)s | %(levelname)-8s | %(name)-30s %(lineno)4d | %(funcName)-50s | %(message)s"
-    date_format = "%Y-%m-%d %H:%M:%S"
-    # Create and configure the root logger with the specified log level and formats
-    logging.basicConfig(level=log_level, format=logging_format, datefmt=date_format)
-    # Enable capturing Python warnings and redirect them to the logging system
-    logging.captureWarnings(True)
-    # Suppress (ignore) Python warnings from appearing in the console
-    warnings.simplefilter("ignore")
-    # List of loggers to prevent messages from reaching the root logger
-    loggers_to_exclude = [
-        "urllib3",
-        "fiona",
-        "botocore",
-        "pyproj",
-        "asyncio",
-        "rasterio",
-        # "scrapy",
-        "distributed",
-        "s3transfer",
-        "charset_normalizer"
-    ]
-    # Iterate through the loggers to exclude
-    for logger_name in loggers_to_exclude:
-        # Get the logger instance for each name in the list
-        logger = logging.getLogger(logger_name)
-        # Disable log message propagation from these loggers to the root logger
-        logger.propagate = False# Define the logging format and date format
-    logging_format = "%(asctime)s | %(levelname)-8s | %(name)-30s %(lineno)4d | %(funcName)-50s | %(message)s"
-    date_format = "%Y-%m-%d %H:%M:%S"
-    # Create and configure the root logger with the specified log level and formats
-    logging.basicConfig(level=log_level, format=logging_format, datefmt=date_format)
-    # Enable capturing Python warnings and redirect them to the logging system
-    logging.captureWarnings(True)
-    # Suppress (ignore) Python warnings from appearing in the console
-    warnings.simplefilter("ignore")
-    # List of loggers to prevent messages from reaching the root logger
-    loggers_to_exclude = [
-        "urllib3",
-        "fiona",
-        "botocore",
-        "pyproj",
-        "asyncio",
-        "rasterio",
-        "scrapy",
-        "distributed",
-        "s3transfer",
-        "charset_normalizer"
-    ]
-    # Iterate through the loggers to exclude
-    for logger_name in loggers_to_exclude:
-        # Get the logger instance for each name in the list
-        logger = logging.getLogger(logger_name)
-        # Disable log message propagation from these loggers to the root logger
-        logger.propagate = False
 
 def print_logger():
     loggers = [logging.getLogger()]  # get the root logger
